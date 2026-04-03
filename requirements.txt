@@ -1,0 +1,7 @@
+mujoco==3.1.6
+gymnasium[mujoco]
+stable-baselines3>=2.8
+mediapy
+numpy
+# PyTorch CPU-only (install separately):
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
