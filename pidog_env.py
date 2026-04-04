@@ -103,7 +103,7 @@ class PiDogEnv(gym.Env):
         orientation_penalty = np.sum(np.square(up_vec[:2])) * 2.0
 
         height_target = 0.05
-        height_penalty = abs(torso_z - height_target) * 5.0
+        height_penalty = abs(torso_z - height_target) * 3.0
 
         lateral_penalty = abs(lateral_vel) * 1.0
         vertical_penalty = abs(vertical_vel) * 1.0
@@ -111,7 +111,7 @@ class PiDogEnv(gym.Env):
         smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.05
 
         reward = (
-            2.0 * forward_vel
+            20.0 * forward_vel
             + alive
             - energy_penalty
             - orientation_penalty

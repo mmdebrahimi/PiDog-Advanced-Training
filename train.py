@@ -10,6 +10,9 @@ Usage:
 
 import argparse
 import os
+
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+
 import numpy as np
 import torch
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -62,11 +65,11 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
         n_steps=1024,
         batch_size=256,
         n_epochs=10,
-        learning_rate=linear_schedule(3e-4),
+        learning_rate=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.01,
+        ent_coef=0.05,
         device=device,
     )
 
