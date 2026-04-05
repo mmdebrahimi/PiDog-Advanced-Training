@@ -25,3 +25,22 @@ pidog_training.zip
 # System
 *.DS_Store
 system_info.txt
+
+# Sensitive
+openai_key
+secret.py
+
+# Large files
+*.STEP
+*.step
+
+# Cloned SunFounder dependencies (tracked separately)
+robot-hat/
+pidog/
+vilib/
+
+# Logs and data
+logs/
+
+# Temp
+tmp/

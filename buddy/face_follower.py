@@ -21,6 +21,8 @@ import numpy as np
 from time import sleep, time
 from picamera2 import Picamera2
 from .servo_controller import ServoController
+from .tracker import SORTTracker
+from .face_id import FaceIDWorker
 
 # Try to import TFLite-based detectors; fall back to Haar-only
 try:
@@ -134,6 +136,14 @@ class FaceFollower:
             if not self._use_tflite:
                 raise RuntimeError("Haar cascade model not found.")
 
+        # SORT tracker for persistent person IDs
+        self._tracker = SORTTracker(max_age=15, min_hits=1, iou_threshold=0.3)
+        self._primary_track_id = None  # Track ID of the person we're following
+
+        # Face ID (async background thread)
+        self._face_id = FaceIDWorker()
+        self._face_id.start()
+
     def start(self):
         """Start camera, face detection, and video display."""
         if self._running:
@@ -166,6 +176,7 @@ class FaceFollower:
 
     def close(self):
         self.stop()
+        self._face_id.stop()
         if self.show_video:
             cv2.destroyAllWindows()
         if self._camera:
@@ -226,6 +237,28 @@ class FaceFollower:
 
     def get_face_info(self):
         return self._face_info.copy()
+
+    def get_tracked_people(self):
+        """Get list of tracked people with IDs and names."""
+        return [{"id": t.id, "name": t.name, "bbox": t.bbox,
+                 "has_face": t.face_bbox is not None}
+                for t in self._tracker.tracks if t.time_since_update == 0]
+
+    def enroll_face(self, name):
+        """Enroll the currently tracked face under a name. Returns True on success."""
+        for t in self._tracker.tracks:
+            if t.face_bbox and t.time_since_update == 0:
+                try:
+                    frame = self._camera.capture_array()
+                    return self._face_id.enroll(frame, t.face_bbox, name)
+                except Exception:
+                    return False
+        return False
+
+    @property
+    def face_id(self):
+        """Access the FaceIDWorker for database operations."""
+        return self._face_id
 
     def center_head(self):
         self.yaw = 0.0
@@ -328,10 +361,21 @@ class FaceFollower:
 
         return target, faces, []
 
-    def _draw_overlay(self, frame, faces, persons=None, target=None):
+    def _draw_overlay(self, frame, faces, persons=None, target=None,
+                      tracks=None):
         """Draw detection rectangles and tracking info on frame."""
-        # Person bounding boxes (blue)
-        if persons:
+        # Tracked persons with IDs and names (replaces raw person boxes)
+        if tracks:
+            for t in tracks:
+                tx, ty, tw, th = t.bbox
+                color = (255, 180, 0)  # orange for tracked
+                cv2.rectangle(frame, (tx, ty), (tx + tw, ty + th), color, 2)
+                label = f"#{t.id}"
+                if t.name:
+                    label += f" {t.name}"
+                cv2.putText(frame, label, (tx, ty - 5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        elif persons:
             for p in persons:
                 px, py, pw, ph = p[:4]
                 conf = p[4] if len(p) > 4 else 0
@@ -386,6 +430,26 @@ class FaceFollower:
             target, faces, persons = self._detect(frame)
             detect_ms = (time() - t_detect) * 1000
 
+            # Update SORT tracker with all person detections
+            tracks = self._tracker.update(persons) if persons else self._tracker.update([])
+
+            # Submit faces to face ID for any tracked person with a face
+            for track in tracks:
+                tid = track.id
+                # Find matching face for this track
+                tx, ty, tw_t, th_t = track.bbox
+                for fx, fy, fw, fh in faces:
+                    # Face is inside this track's person bbox?
+                    if (fx >= tx and fy >= ty
+                            and fx + fw <= tx + tw_t and fy + fh <= ty + th_t):
+                        track.face_bbox = (fx, fy, fw, fh)
+                        self._face_id.submit(frame, (fx, fy, fw, fh), tid)
+                        break
+                # Update track name from face ID results
+                result = self._face_id.get_result(tid)
+                if result and result[0]:
+                    track.name = result[0]
+
             state = 'idle'
             if target:
                 tcx, tcy, tw = target[0], target[1], target[2]
@@ -436,7 +500,8 @@ class FaceFollower:
 
             # Draw overlay and store for video display
             if self.show_video:
-                annotated = self._draw_overlay(frame.copy(), faces, persons, target)
+                annotated = self._draw_overlay(frame.copy(), faces, persons, target,
+                                               tracks)
                 # Show FPS on overlay
                 fps = 1000.0 / frame_ms if frame_ms > 0 else 0
                 cv2.putText(annotated, f"{fps:.0f} FPS | det {detect_ms:.0f}ms",
