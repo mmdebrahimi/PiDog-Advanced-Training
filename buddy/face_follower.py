@@ -110,8 +110,8 @@ class FaceFollower:
 
         # Tracking state (accessed by detection thread)
         self._tracking = False
-        self._last_face_time = 0
-        self._last_sound_time = 0
+        self._last_face_time = time()  # Suppress sound/sweep for first few seconds
+        self._last_sound_time = time()
         self._coast_count = 0
         self._sweep_direction = 1  # 1 = moving right, -1 = moving left
         self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
