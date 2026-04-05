@@ -433,18 +433,24 @@ class FaceFollower:
             # Update SORT tracker with all person detections
             tracks = self._tracker.update(persons) if persons else self._tracker.update([])
 
-            # Submit faces to face ID for any tracked person with a face
+            # Match faces to tracks by center distance (robust to bbox timing mismatch)
             for track in tracks:
                 tid = track.id
-                # Find matching face for this track
-                tx, ty, tw_t, th_t = track.bbox
+                tcx_t, tcy_t = track.center
+                best_face = None
+                best_dist = float('inf')
                 for fx, fy, fw, fh in faces:
-                    # Face is inside this track's person bbox?
-                    if (fx >= tx and fy >= ty
-                            and fx + fw <= tx + tw_t and fy + fh <= ty + th_t):
-                        track.face_bbox = (fx, fy, fw, fh)
-                        self._face_id.submit(frame, (fx, fy, fw, fh), tid)
-                        break
+                    fcx, fcy = fx + fw / 2, fy + fh / 2
+                    dist = ((fcx - tcx_t) ** 2 + (fcy - tcy_t) ** 2) ** 0.5
+                    # Match if face center within half the track bbox diagonal
+                    tx, ty, tw_t, th_t = track.bbox
+                    max_dist = ((tw_t ** 2 + th_t ** 2) ** 0.5) / 2
+                    if dist < max_dist and dist < best_dist:
+                        best_dist = dist
+                        best_face = (fx, fy, fw, fh)
+                if best_face:
+                    track.face_bbox = best_face
+                    self._face_id.submit(frame, best_face, tid)
                 # Update track name from face ID results
                 result = self._face_id.get_result(tid)
                 if result and result[0]:
@@ -464,17 +470,23 @@ class FaceFollower:
                 self._tracking = True
                 self._last_face_time = time()
 
+                # Remember which track we're following for coasting
+                if tracks:
+                    self._last_track_id = tracks[0].id
+
                 if self.dog:
                     self._track_head(tcx, tcy)
                 if self.follow_mode and self.dog and target[3] == 'face':
                     self._follow_body(tw)
 
             elif self._tracking and self._coast_count < self.TRACK_COAST_FRAMES:
-                # No detection this frame — coast on Kalman prediction
+                # No detection this frame — coast on SORT track's Kalman prediction
                 self._coast_count += 1
-                predicted = self._servo.predict()
-                if predicted and self.dog:
-                    self._track_head(predicted[0], predicted[1])
+                track = self._tracker.get_track(
+                    getattr(self, '_last_track_id', None))
+                if track and self.dog:
+                    cx, cy = track.center
+                    self._track_head(cx, cy)
                 state = 'coast'
 
             else:

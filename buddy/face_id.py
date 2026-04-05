@@ -25,10 +25,34 @@ MATCH_THRESHOLD = 0.40    # Above this = match
 MAYBE_THRESHOLD = 0.30    # Between maybe and match = uncertain
 
 
+SFACE_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+
+
+def _ensure_model(path, url, name):
+    """Download model if it doesn't exist. Returns True on success."""
+    if os.path.exists(path):
+        return True
+    print(f"  {name} model not found. Downloading...")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(url, path)
+        size = os.path.getsize(path) / 1024 / 1024
+        print(f"  Downloaded {name} ({size:.1f} MB)")
+        return True
+    except Exception as e:
+        print(f"  Download failed: {e}")
+        print(f"  Manual fix: download from {url}")
+        print(f"  and place at {path}")
+        return False
+
+
 class FaceEmbedder:
     """Generate face embeddings using SFace via OpenCV."""
 
     def __init__(self, model_path=SFACE_MODEL):
+        if not _ensure_model(model_path, SFACE_URL, "SFace"):
+            raise RuntimeError(f"SFace model not available at {model_path}")
         self._recognizer = cv2.FaceRecognizerSF.create(model_path, "")
 
     def embed(self, face_crop):

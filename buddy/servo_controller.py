@@ -67,62 +67,6 @@ class KalmanFilter2D:
         return self._initialized
 
 
-class PIDController:
-    """PID controller for one axis (yaw or pitch).
-
-    Converts pixel error to servo angle adjustment.
-    Derivative is computed on measurement (not error) to avoid kick on setpoint change.
-    """
-
-    def __init__(self, kp, ki, kd, integral_clamp=15.0, derivative_alpha=0.5):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.integral_clamp = integral_clamp
-        self.derivative_alpha = derivative_alpha
-
-        self._integral = 0.0
-        self._prev_measurement = None
-        self._filtered_derivative = 0.0
-
-    def compute(self, error, measurement, dt):
-        """Compute PID output.
-
-        Args:
-            error: setpoint - measurement (pixels from center)
-            measurement: current measured position (for derivative-on-measurement)
-            dt: time step in seconds
-
-        Returns:
-            Control output in degrees.
-        """
-        # Proportional
-        p = self.kp * error
-
-        # Integral with anti-windup
-        self._integral += error * dt
-        self._integral = max(-self.integral_clamp, min(self.integral_clamp, self._integral))
-        i = self.ki * self._integral
-
-        # Derivative on measurement (not error) to avoid setpoint kick
-        if self._prev_measurement is not None and dt > 0:
-            raw_derivative = -(measurement - self._prev_measurement) / dt
-            self._filtered_derivative = (
-                self.derivative_alpha * raw_derivative
-                + (1 - self.derivative_alpha) * self._filtered_derivative
-            )
-        d = self.kd * self._filtered_derivative
-        self._prev_measurement = measurement
-
-        return p + i + d
-
-    def reset(self):
-        """Reset controller state."""
-        self._integral = 0.0
-        self._prev_measurement = None
-        self._filtered_derivative = 0.0
-
-
 class ServoSmoother:
     """EMA (exponential moving average) smoother for servo commands.
 

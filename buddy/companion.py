@@ -8,7 +8,7 @@ Usage:
 
 import argparse
 import signal
-from time import sleep
+from time import sleep, time
 
 from . import config
 from .realtime_voice import RealtimeVoice
@@ -177,18 +177,32 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
 
     # --- Main loop: update room awareness every 2 seconds ---
     last_room_summary = ""
+    last_instruction_time = 0
+    last_who_printed = []
+    INSTRUCTION_INTERVAL = 10.0  # Min seconds between LLM instruction updates
     try:
         while True:
             sleep(2)
             if not sleeping:
                 room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
-                summary = room.get_summary()
-                if summary != last_room_summary:
-                    last_room_summary = summary
-                    voice.update_instructions(build_instructions(summary))
-                    who = room.who_is_here()
+                who = room.who_is_here()
+
+                # Print room changes (arrivals/departures only)
+                if sorted(who) != sorted(last_who_printed):
                     if who:
                         print(f"  Room: {', '.join(who)}")
+                    else:
+                        print("  Room: empty")
+                    last_who_printed = list(who)
+
+                # Rate-limit LLM instruction updates
+                summary = room.get_summary()
+                now = time()
+                if (summary != last_room_summary
+                        and now - last_instruction_time >= INSTRUCTION_INTERVAL):
+                    last_room_summary = summary
+                    last_instruction_time = now
+                    voice.update_instructions(build_instructions(summary))
     except KeyboardInterrupt:
         signal_handler(None, None)
 
