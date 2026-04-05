@@ -67,7 +67,7 @@ class FaceFollower:
     SWEEP_TIMEOUT = 3.0  # seconds with no face/sound before sweeping
 
     def __init__(self, dog_behavior=None, show_video=True, detector='auto',
-                 log=False):
+                 log=False, social_graph=None):
         """
         Args:
             dog_behavior: DogBehavior instance (None = video only, no head tracking)
@@ -156,7 +156,7 @@ class FaceFollower:
         self._primary_track_id = None  # Track ID of the person we're following
 
         # Face ID (async background thread)
-        self._face_id = FaceIDWorker()
+        self._face_id = FaceIDWorker(social_graph=social_graph)
         self._face_id.start()
 
     def start(self):

@@ -173,9 +173,10 @@ class FaceIDWorker:
 
     COOLDOWN = 1.5  # Seconds between ID attempts per track
 
-    def __init__(self):
+    def __init__(self, social_graph=None):
         self._embedder = FaceEmbedder()
         self._database = FaceDatabase()
+        self._social_graph = social_graph
         self._running = False
         self._thread = None
         self._pending = None  # (frame, face_bbox, track_id)
@@ -214,13 +215,16 @@ class FaceIDWorker:
         return self._results.get(track_id)
 
     def enroll(self, frame, face_bbox, name):
-        """Enroll a face under a name (blocking)."""
+        """Enroll a face under a name (blocking). Also adds to social graph."""
         x, y, w, h = face_bbox
         crop = frame[y:y+h, x:x+w]
         if crop.size == 0:
             return False
         embedding = self._embedder.embed(crop)
         self._database.add_face(name, embedding)
+        # Also ensure they exist in social graph
+        if self._social_graph and not self._social_graph.get_person(name):
+            self._social_graph.add_person(name)
         return True
 
     @property

@@ -30,8 +30,8 @@ def run_companion(safe_mode=True, show_video=False):
     dog = DogBehavior(safe_mode=safe_mode)
     print(f"Safe mode: {'ON' if safe_mode else 'OFF'}")
 
-    # --- Initialize face follower ---
-    tracker = FaceFollower(dog_behavior=dog, show_video=show_video)
+    # --- Initialize face follower (social_graph linked after load) ---
+    tracker = None  # Created after social_graph is initialized
 
     # --- Initialize room awareness ---
     room = RoomState()
@@ -53,6 +53,10 @@ def run_companion(safe_mode=True, show_video=False):
     personality.on_session_start()
     memory_text = memory.load_memory()
     print(f"Personality: {personality.mood['current']} | People: {len(social_graph.people)}")
+
+    # --- Create face follower with social graph linkage ---
+    tracker = FaceFollower(dog_behavior=dog, show_video=show_video,
+                           social_graph=social_graph)
 
     # --- Build instructions ---
     BEHAVIOR_RULES = f"""You are {config.DOG_NAME}, a friendly robot dog and best friend of {config.CHILD_NAME}.
@@ -163,12 +167,17 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
         print("\nShutting down...")
         tracker.close()
         voice.stop()
-        # Save memory + personality
+        # Save memory + social graph + personality
         print("Saving memories...")
+        transcripts = voice.get_transcripts()
         try:
-            memory.update_memory(api_key, voice.get_transcripts(), memory_text)
+            memory.update_memory(api_key, transcripts, memory_text)
         except Exception as e:
             print(f"Memory save error: {e}")
+        try:
+            memory.update_social_graph(api_key, transcripts, social_graph)
+        except Exception as e:
+            print(f"Social graph update error: {e}")
         try:
             personality.on_session_end()
             print("Personality state saved.")
