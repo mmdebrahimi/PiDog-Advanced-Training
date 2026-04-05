@@ -45,7 +45,7 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - **List known faces:** `python3 -m buddy.face_id --list`
 - Audio: sounddevice through PulseAudio (auto-detected pulse device) → HDMI output
 - Set HDMI as default: `pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo`
-- Config files: `~/.config/pidog/names.json`, `openai_key`, `pidog-longterm-memory.md`, `known_faces.json`
+- Config files: `~/.config/pidog/names.json`, `openai_key`, `pidog-longterm-memory.md`, `known_faces.json`, `social_graph.json`, `personality.json`
 - Safe mode ON by default (no walking — desk safe). Use `--no-safe` for floor testing.
 - Always clear cache after edits: `find ~/pidog_lab/buddy -name "__pycache__" -exec rm -rf {} +`
 - Dog name: Nounou. Wake word: "hi nounou". Sleep word: "goodnight".
@@ -66,5 +66,11 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - RL Training: in progress on laptop (reward tuning, CUDA training)
 - Voice Companion: working via Realtime API with person tracking + room awareness
 - Person Tracking: working (TFLite + SORT + face ID + room awareness)
-- Wake from sleep: needs fixing (WebSocket may stop transcribing after go_to_sleep)
+- Personality/Memory: social graph + personality state + memory compiler — all working
+- Wake from sleep: head pat wake added; voice wake depends on API still transcribing
+- Sound direction: disabled (fires on ambient noise, conflicts with servo thread)
+- All 30 ActionFlow actions available to LLM
+- Shutdown: Ctrl+C works (first=graceful, second=force quit)
+- Volume: set to 100% at startup via pactl
 - Plans index: `~/pidog_lab/wiki/plans-index.md`
+- Next: Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)

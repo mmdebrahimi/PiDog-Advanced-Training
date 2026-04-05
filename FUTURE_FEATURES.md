@@ -42,7 +42,19 @@ When multiple people are in the room (tracked by SORT + face ID), the dog could 
 
 ### Voice Companion V2 — Emotional State
 Date: 04/04/2026
-Give the dog moods that persist across conversations: excited when Alice comes home, sleepy at bedtime, playful after school. Mood affects action choices and speech tone. Transforms chatbot-in-a-dog into something that feels alive.
+**Partially implemented (2026-04-05):** `personality.py` now has mood that evolves between sessions (excitement scales with absence). Traits are fixed. Quirks injected into LLM context. Remaining: mood affecting action choices (needs Behavior Engine), speech tone changes (Realtime API voice is fixed per session).
+
+### Behavior Engine
+Date: 05/04/2026
+Priority-based state machine that centralizes Nounou's decision-making. Evaluates inputs (room state, tracking, voice, touch, time of day) every 500ms and picks the highest-priority active behavior: GREET, TRACK, SEARCH, REST, SLEEP. Controls head target, body actions, LED patterns, and voice context. Plan at `plans/Behavior_Engine_Plan.md`.
+
+### Episodic Memory (v2)
+Date: 05/04/2026
+Per-session episode summaries stored in `~/.config/pidog/episodic_memory/YYYY-MM-DD.json`. Enables "remember when..." conversations. Requires forgetting/compression for old episodes. Current flat memory + social graph is v1; this is the v2 upgrade.
+
+### Adaptive Volume
+Date: 05/04/2026
+Measure ambient noise level via mic and adjust PulseAudio output volume dynamically. Louder in noisy rooms, quieter at night. Currently set to 100% at startup which is the simple fix.
 
 ### Local Wake Word for Sleep State
 Date: 05/04/2026

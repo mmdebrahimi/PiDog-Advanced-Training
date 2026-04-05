@@ -80,7 +80,10 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
     tracker.py        # SORT tracker (Kalman + Hungarian assignment)
     face_id.py        # Face recognition (SFace embeddings + JSON database)
     room_awareness.py # Who's here, where last seen, LLM context
-    memory.py         # Long-term memory (pidog-longterm-memory.md)
+    social_graph.py   # People database (roles, relationships, interests)
+    personality.py    # Mood, traits, quirks, preferences (persistent)
+    memory_compiler.py # Compiles all memory sources into LLM context
+    memory.py         # Long-term memory + social graph session-end updates
     models/           # ONNX models (SFace, YuNet — gitignored, auto-downloaded)
     main.py           # Legacy 3-call pipeline entry point
   wiki/               # Plans index, decisions log
