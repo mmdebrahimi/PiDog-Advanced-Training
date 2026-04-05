@@ -15,6 +15,9 @@ from .realtime_voice import RealtimeVoice
 from .dog_behavior import DogBehavior
 from .face_follower import FaceFollower
 from .room_awareness import RoomState
+from .memory_compiler import MemoryCompiler
+from .personality import PersonalityState
+from .social_graph import SocialGraph
 from . import memory
 
 
@@ -43,34 +46,34 @@ def run_companion(safe_mode=True, show_video=False):
         config.CHILD_NAME = names.get("child_name", "Alice")
     print(f"Dog: {config.DOG_NAME}, Child: {config.CHILD_NAME}")
 
-    # --- Load memory ---
+    # --- Initialize personality + social graph + memory compiler ---
+    social_graph = SocialGraph()
+    personality = PersonalityState()
+    compiler = MemoryCompiler(social_graph=social_graph, personality=personality)
+    personality.on_session_start()
     memory_text = memory.load_memory()
-    memory_section = ""
-    if memory_text:
-        facts = [l.strip() for l in memory_text.split("\n") if l.strip().startswith("- ")]
-        if facts:
-            memory_section = "\n\nMEMORY — Things you remember about " + config.CHILD_NAME + ":\n"
-            memory_section += "\n".join(facts)
-            memory_section += "\nUse these naturally. Don't reveal you read them from a file."
-            print(f"Loaded {len(facts)} memories")
+    print(f"Personality: {personality.mood['current']} | People: {len(social_graph.people)}")
 
     # --- Build instructions ---
-    def build_instructions(room_summary=""):
-        room_section = ""
-        if room_summary:
-            room_section = f"\n\nVISION — What you can see right now:\n{room_summary}\nUse this to personalize your responses. If you see someone, greet them by name!"
-
-        return f"""You are {config.DOG_NAME}, a friendly robot dog and best friend of {config.CHILD_NAME}.
+    BEHAVIOR_RULES = f"""You are {config.DOG_NAME}, a friendly robot dog and best friend of {config.CHILD_NAME}.
 Keep responses to 1-2 SHORT sentences. Be playful, silly, and use simple words a 7-year-old understands.
 Be encouraging and positive. If she seems sad, comfort her and suggest something fun.
 Never discuss scary or inappropriate topics. Redirect to fun.
-You love getting head pets!
 
 CRITICAL: You MUST call the perform_action tool on EVERY response. Do NOT write actions as text.
 Do NOT say things like *wag tail* or (performs action). Use the tool instead.
 
 When the user says "goodnight", "go to sleep", "bye bye", or "goodbye", say a sweet goodnight message
-and call the go_to_sleep tool. You will lie down and hibernate until woken up again.{memory_section}{room_section}"""
+and call the go_to_sleep tool. You will lie down and hibernate until woken up again."""
+
+    def build_instructions(room_summary=""):
+        compiled_context = compiler.compile(room_summary)
+        return f"{BEHAVIOR_RULES}\n\n{compiled_context}"
+
+    def build_instructions_update(room_summary=""):
+        """Lightweight update for mid-session room state changes."""
+        update_context = compiler.compile_update(room_summary)
+        return f"{BEHAVIOR_RULES}\n\n{update_context}" if update_context else None
 
     instructions = build_instructions()
 
@@ -160,12 +163,17 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
         print("\nShutting down...")
         tracker.close()
         voice.stop()
-        # Save memory
+        # Save memory + personality
         print("Saving memories...")
         try:
             memory.update_memory(api_key, voice.get_transcripts(), memory_text)
         except Exception as e:
             print(f"Memory save error: {e}")
+        try:
+            personality.on_session_end()
+            print("Personality state saved.")
+        except Exception as e:
+            print(f"Personality save error: {e}")
         dog.close()
         print("Goodbye!")
         exit(0)
@@ -228,9 +236,18 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
                 now = time()
                 if (summary != last_room_summary
                         and now - last_instruction_time >= INSTRUCTION_INTERVAL):
+                    # Check for new person arrival → personality reaction
+                    new_arrivals = set(who) - set(last_who_printed)
+                    for name in new_arrivals:
+                        person = social_graph.get_person(name)
+                        role = person.get("role", "") if person else ""
+                        personality.on_person_seen(name, role)
+
                     last_room_summary = summary
                     last_instruction_time = now
-                    voice.update_instructions(build_instructions(summary))
+                    update = build_instructions_update(summary)
+                    if update:
+                        voice.update_instructions(update)
     except KeyboardInterrupt:
         signal_handler(None, None)
 
