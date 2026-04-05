@@ -11,6 +11,18 @@
 - [ ] Install PyTorch with CUDA: `pip install torch --index-url https://download.pytorch.org/whl/cu124`
 - [ ] Run baseline training: `python train.py --timesteps=3000000`
 
+## Voice Companion
+- [x] Realtime API voice working (sub-second latency, function calling)
+- [x] Actions execute on real dog via tool calls (wag tail, sit, bark, etc.)
+- [x] Dog name set to Nounou, child name Alice
+- [ ] Fix wake-from-sleep (WebSocket may stop transcribing after go_to_sleep)
+- [ ] Verify long-term memory persistence across sessions
+- [ ] I2S speaker doesn't produce audio — investigate or accept HDMI
+- [ ] CSI camera not detected — check ribbon cable or accept USB webcam
+- [ ] Test face tracking with real face (face_follower.py built but untested)
+- [x] Integrate face tracking into companion.py (with sound direction + sweep)
+- [ ] Daughter's first full interaction
+
 ## Future optimization (after baseline training succeeds)
 - [ ] Add VecNormalize if explained_variance stays below 0.4
 - [ ] Tune reward weights if robot stands but doesn't walk

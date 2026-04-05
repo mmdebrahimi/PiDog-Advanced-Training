@@ -8,3 +8,16 @@
 - **Install PyTorch with CUDA, not CPU** — `pip install torch --index-url https://download.pytorch.org/whl/cu126` for GPU training. CPU-only wastes GPU hardware. Python 3.14 doesn't have CUDA builds yet — use the `.venv` (Python 3.10). Set `$env:CUDA_VISIBLE_DEVICES="0"` before running to fix CUDA init errors on Windows.
 - **Claude skills repo** — located at `C:\Users\b0652085\.claude\my_skills_repo`, remote: `https://github.com/OriginalGoku/my_skills.git`. Pull with `git pull origin main`.
 - **Clear `__pycache__` after editing `pidog_env.py`** — SubprocVecEnv spawns separate processes that load cached `.pyc` files. If you edit the env and don't clear cache, training uses old code while eval uses new code (eval showed 1000 steps, training showed ep_len=1).
+- **PyAudio default device is often wrong on Pi** — it picks HDMI (card 0) which has no capture. Use `_find_usb_mic()` to auto-detect the USB mic by name, or specify device index explicitly.
+- **`aplay` without `-D` uses wrong output** — on Pi with multiple sound cards, always specify device: `aplay -D plughw:0,0` for HDMI. Default may route to a non-connected device.
+- **GPIO "busy" error after unclean Pidog shutdown** — if a previous Python process didn't call `dog.close()`, GPIO 5 (MCU reset) stays claimed. Kill stale python processes or use `lgpio.gpio_free()` to release.
+- **I2S `googlevoicehat-soundcard` overlay can activate without reboot** — appeared as card 4 after adding to config.txt, but produced white noise until properly configured. Mute with `pactl set-sink-mute <sink_id> 1`.
+- **I2S Robot HAT speaker produces no audible output** — even with speaker enable GPIO 20 set high and card 3 detected. Likely no physical speaker wired on this HAT v4 revision. Use HDMI for audio output.
+- **OpenAI Realtime API event names differ from docs** — newer API uses `response.output_audio.delta` not `response.audio.delta`, and `response.output_audio_transcript.done` not `response.audio_transcript.done`. Always inspect `session.created` event to see actual schema.
+- **Realtime API session config requires `type: "realtime"` field** — not documented clearly. Also `modalities` → `output_modalities`, `voice` → `audio.output.voice`, `turn_detection` → `audio.input.turn_detection`.
+- **Realtime API voice options differ from TTS API** — `nova` is not available. Use `shimmer`, `alloy`, `ash`, `coral`, `echo`, `sage`, `ballad`, `verse`, `marin`, or `cedar`.
+- **USB webcam mic doesn't support 24kHz** — the Realtime API uses 24kHz PCM16. Use PulseAudio (sounddevice device 9) which resamples automatically.
+- **`nonlocal` doesn't work in module-level `__main__` block** — use a mutable container (`state = {"sleeping": False}`) instead.
+- **vilib `camera_start()` hangs on USB webcam** — vilib was designed for CSI cameras only. Bypass vilib and use picamera2 + OpenCV directly for face detection.
+- **Whisper hallucinates "Thanks for watching" on silence** — known bug. Filter with a hallucination blocklist. The Realtime API's server-side VAD eliminates this problem.
+- **Picamera2 can't be re-opened after `stop()` without `close()`** — `FaceFollower.start()` must check if camera already exists and reuse it, rather than creating a new `Picamera2()` instance each time. Only `close()` fully releases the camera resource.
