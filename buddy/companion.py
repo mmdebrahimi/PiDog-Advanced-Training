@@ -126,7 +126,8 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
                 tracker.start()
                 # Check who woke us up after a brief delay for detection
                 sleep(1.5)
-                room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
+                yaw, pitch = tracker.get_yaw_pitch()
+                room.update(tracker.get_tracked_people(), yaw, pitch)
                 greeted = room.get_greeting()
                 if greeted:
                     print(f"  Recognized: {greeted}!")
@@ -198,7 +199,8 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             last_room_update = now
 
             if not sleeping:
-                room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
+                yaw, pitch = tracker.get_yaw_pitch()
+                room.update(tracker.get_tracked_people(), yaw, pitch)
                 who = room.who_is_here()
 
                 # Print room changes (arrivals/departures only)

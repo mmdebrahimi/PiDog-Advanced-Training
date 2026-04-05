@@ -95,15 +95,24 @@ class FaceFollower:
         )
         self._servo.reset(yaw=0.0, pitch=self.DEFAULT_PITCH)
 
-        # Head state (kept in sync with servo controller for external access)
+        # Head state (written by tracking thread)
         self.yaw = 0.0
         self.pitch = float(self.DEFAULT_PITCH)
 
-        # Tracking state
+        # Thread-safe shared state snapshot (read by companion thread)
+        self._state_lock = threading.Lock()
+        self._shared_state = {
+            "yaw": 0.0, "pitch": float(self.DEFAULT_PITCH),
+            "tracking": False,
+            "face_info": {"x": 0, "y": 0, "w": 0, "n": 0},
+            "tracked_people": [],
+        }
+
+        # Tracking state (only accessed by tracking thread)
         self._tracking = False
         self._last_face_time = 0
         self._last_sound_time = 0
-        self._coast_count = 0  # Frames without detection while coasting on Kalman
+        self._coast_count = 0
         self._sweep_direction = 1  # 1 = moving right, -1 = moving left
         self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
 
@@ -232,17 +241,38 @@ class FaceFollower:
     def set_follow_mode(self, enabled):
         self.follow_mode = enabled
 
+    def _update_shared_state(self, tracks=None):
+        """Copy current tracking state to shared snapshot (thread-safe)."""
+        people = []
+        if tracks:
+            people = [{"id": t.id, "name": t.name, "bbox": t.bbox,
+                       "has_face": t.face_bbox is not None}
+                      for t in tracks if t.time_since_update == 0]
+        with self._state_lock:
+            self._shared_state = {
+                "yaw": self.yaw, "pitch": self.pitch,
+                "tracking": self._tracking,
+                "face_info": self._face_info.copy(),
+                "tracked_people": people,
+            }
+
     def is_tracking(self):
-        return self._tracking
+        with self._state_lock:
+            return self._shared_state["tracking"]
 
     def get_face_info(self):
-        return self._face_info.copy()
+        with self._state_lock:
+            return self._shared_state["face_info"].copy()
 
     def get_tracked_people(self):
-        """Get list of tracked people with IDs and names."""
-        return [{"id": t.id, "name": t.name, "bbox": t.bbox,
-                 "has_face": t.face_bbox is not None}
-                for t in self._tracker.tracks if t.time_since_update == 0]
+        """Get list of tracked people with IDs and names (thread-safe)."""
+        with self._state_lock:
+            return list(self._shared_state["tracked_people"])
+
+    def get_yaw_pitch(self):
+        """Get current servo angles (thread-safe)."""
+        with self._state_lock:
+            return self._shared_state["yaw"], self._shared_state["pitch"]
 
     def enroll_face(self, name):
         """Enroll the currently tracked face under a name. Returns True on success."""
@@ -521,6 +551,9 @@ class FaceFollower:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
                 with self._frame_lock:
                     self._latest_frame = annotated
+
+            # Update shared state for companion thread
+            self._update_shared_state(tracks)
 
             # Log frame data
             self._log_frame(frame_ms, detect_ms, target, faces, persons, state)
