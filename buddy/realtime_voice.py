@@ -149,13 +149,11 @@ class RealtimeVoice:
         self.instructions = instructions
         try:
             if self._conn and self._loop and self._loop.is_running():
-                import json as _json
-                msg = _json.dumps({
-                    "type": "session.update",
-                    "session": {"instructions": instructions}
-                })
                 asyncio.run_coroutine_threadsafe(
-                    self._conn.send(msg), self._loop
+                    self._conn.send({
+                        "type": "session.update",
+                        "session": {"instructions": instructions}
+                    }), self._loop
                 )
         except RuntimeError:
             pass  # Event loop closed
