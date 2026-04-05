@@ -72,6 +72,32 @@ GO_TO_SLEEP_TOOL = {
     }
 }
 
+WHO_IS_HERE_TOOL = {
+    "type": "function",
+    "name": "who_is_here",
+    "description": "Look around and report who you can see. Call this when someone asks 'who is here', 'who can you see', 'can you see me', or similar questions about people nearby.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    }
+}
+
+REMEMBER_FACE_TOOL = {
+    "type": "function",
+    "name": "remember_face",
+    "description": "Remember someone's face so you can recognize them later. Call this when someone says 'remember my face', 'my name is X', 'I'm X', or asks you to learn who they are.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "The person's name to remember"
+            }
+        },
+        "required": ["name"]
+    }
+}
+
 
 class RealtimeVoice:
     """Manages a voice conversation via OpenAI Realtime API."""
@@ -88,6 +114,8 @@ class RealtimeVoice:
         self._on_speaking_start = None
         self._on_speaking_end = None
         self._on_sleep = None
+        self._on_who_is_here = None
+        self._on_remember_face = None
 
         # State
         self._speaking = False  # True while model is outputting audio
@@ -120,6 +148,14 @@ class RealtimeVoice:
     def on_sleep(self, callback):
         """Register callback when model calls go_to_sleep (goodnight)."""
         self._on_sleep = callback
+
+    def on_who_is_here(self, callback):
+        """Register callback for who_is_here tool: callback() -> str"""
+        self._on_who_is_here = callback
+
+    def on_remember_face(self, callback):
+        """Register callback for remember_face tool: callback(name) -> str"""
+        self._on_remember_face = callback
 
     def start(self):
         """Start the realtime voice session in a background thread."""
@@ -204,7 +240,8 @@ class RealtimeVoice:
                             "voice": self.voice,
                         },
                     },
-                    "tools": [PERFORM_ACTION_TOOL, GO_TO_SLEEP_TOOL],
+                    "tools": [PERFORM_ACTION_TOOL, GO_TO_SLEEP_TOOL,
+                              WHO_IS_HERE_TOOL, REMEMBER_FACE_TOOL],
                     "tool_choice": "auto",
                 }
             })
@@ -332,6 +369,33 @@ class RealtimeVoice:
                             "type": "function_call_output",
                             "call_id": event.call_id,
                             "output": json.dumps({"status": "executed"})
+                        })
+                        await conn.response.create()
+
+                    elif func_name == "who_is_here":
+                        result = ""
+                        if self._on_who_is_here:
+                            result = self._on_who_is_here()
+                        await conn.conversation.item.create(item={
+                            "type": "function_call_output",
+                            "call_id": event.call_id,
+                            "output": json.dumps({"vision": result})
+                        })
+                        await conn.response.create()
+
+                    elif func_name == "remember_face":
+                        result = "No face visible right now."
+                        try:
+                            args = json.loads(event.arguments)
+                            name = args.get("name", "")
+                            if name and self._on_remember_face:
+                                result = self._on_remember_face(name)
+                        except json.JSONDecodeError:
+                            result = "Could not understand the name."
+                        await conn.conversation.item.create(item={
+                            "type": "function_call_output",
+                            "call_id": event.call_id,
+                            "output": json.dumps({"result": result})
                         })
                         await conn.response.create()
 

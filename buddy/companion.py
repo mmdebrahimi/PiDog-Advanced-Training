@@ -137,11 +137,23 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             elif text_lower:
                 print(f"  [Sleeping, heard: '{text}' — say 'hi {config.DOG_NAME.lower()}' to wake]")
 
+    def on_who_is_here():
+        return room.get_summary()
+
+    def on_remember_face(name):
+        success = tracker.enroll_face(name)
+        if success:
+            print(f"  Enrolled face: {name}")
+            return f"Got it! I'll remember {name}'s face."
+        return "I can't see a face right now. Look at me and try again."
+
     voice.on_actions(on_actions)
     voice.on_speaking_start(on_speaking_start)
     voice.on_speaking_end(on_speaking_end)
     voice.on_sleep(on_sleep)
     voice.on_user_transcript(on_user_transcript)
+    voice.on_who_is_here(on_who_is_here)
+    voice.on_remember_face(on_remember_face)
 
     # --- Graceful shutdown ---
     def signal_handler(sig, frame):
