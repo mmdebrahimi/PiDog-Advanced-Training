@@ -20,10 +20,22 @@ CHANNELS = 1
 CHUNK_DURATION = 0.1  # 100ms chunks
 CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_DURATION)
 
-# Audio device indices (from sounddevice query)
-# Use pulse (device 9) which handles resampling to 24kHz for both in and out
-INPUT_DEVICE = 9    # pulse (routes to USB webcam mic)
-OUTPUT_DEVICE = 9   # pulse (routes to default output — HDMI)
+# Audio device — find PulseAudio dynamically instead of hardcoding index
+def _find_pulse_device():
+    """Find the PulseAudio device index (handles device reordering across reboots)."""
+    try:
+        devices = sd.query_devices()
+        for i, d in enumerate(devices):
+            name = d['name'].lower() if isinstance(d['name'], str) else ''
+            if 'pulse' in name and d['max_input_channels'] > 0 and d['max_output_channels'] > 0:
+                return i
+    except Exception:
+        pass
+    return None  # Fall back to sounddevice default
+
+_PULSE_DEV = _find_pulse_device()
+INPUT_DEVICE = _PULSE_DEV
+OUTPUT_DEVICE = _PULSE_DEV
 
 REALTIME_MODEL = "gpt-4o-realtime-preview"
 
@@ -119,8 +131,11 @@ class RealtimeVoice:
     def stop(self):
         """Stop the voice session."""
         self._running = False
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        try:
+            if self._loop and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+        except RuntimeError:
+            pass  # Event loop already closed
         if self._thread:
             self._thread.join(timeout=5)
         print("Realtime voice session stopped.")
@@ -132,15 +147,18 @@ class RealtimeVoice:
     def update_instructions(self, instructions):
         """Update session instructions (e.g., to inject room state)."""
         self.instructions = instructions
-        if self._conn and self._loop and self._loop.is_running():
-            import json as _json
-            msg = _json.dumps({
-                "type": "session.update",
-                "session": {"instructions": instructions}
-            })
-            asyncio.run_coroutine_threadsafe(
-                self._conn.send(msg), self._loop
-            )
+        try:
+            if self._conn and self._loop and self._loop.is_running():
+                import json as _json
+                msg = _json.dumps({
+                    "type": "session.update",
+                    "session": {"instructions": instructions}
+                })
+                asyncio.run_coroutine_threadsafe(
+                    self._conn.send(msg), self._loop
+                )
+        except RuntimeError:
+            pass  # Event loop closed
 
     def _run_async(self):
         """Run the async event loop in a thread."""
