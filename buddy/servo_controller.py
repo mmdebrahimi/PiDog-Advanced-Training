@@ -1,70 +1,12 @@
 """Smooth servo control for PiDog head tracking.
 
-Kalman filter smooths noisy detection positions, proportional control
-converts angular error to servo correction, EMA prevents jittery motion.
+Proportional control converts angular error to servo correction,
+EMA prevents jittery motion. SORT tracker handles detection smoothing.
 
-Pipeline: detected position → Kalman predict/update → proportional → EMA → head_move()
+Pipeline: target position → proportional → EMA → head_move()
 """
 
-import numpy as np
 from time import time
-
-
-class KalmanFilter2D:
-    """Constant-velocity Kalman filter for 2D position tracking.
-
-    State: [x, y, vx, vy] — pixel position and velocity.
-    Measurement: [x, y] — detected face/head center.
-    """
-
-    def __init__(self, process_noise=(1, 1, 5, 5), measurement_noise=(15, 15)):
-        self.x = np.zeros(4)  # state: [x, y, vx, vy]
-        self.P = np.diag([50.0, 50.0, 10.0, 10.0])  # covariance
-        self.Q = np.diag(process_noise).astype(float)
-        self.R = np.diag(measurement_noise).astype(float)
-        self.H = np.array([[1, 0, 0, 0],
-                           [0, 1, 0, 0]], dtype=float)
-        self._initialized = False
-
-    def predict(self, dt):
-        """Predict next state. Call once per frame before update."""
-        F = np.array([[1, 0, dt, 0],
-                      [0, 1, 0, dt],
-                      [0, 0, 1, 0],
-                      [0, 0, 0, 1]], dtype=float)
-        self.x = F @ self.x
-        self.P = F @ self.P @ F.T + self.Q
-        return self.x[0], self.x[1]
-
-    def update(self, z_x, z_y):
-        """Update state with measurement. Call when detection is available."""
-        if not self._initialized:
-            self.x[0] = z_x
-            self.x[1] = z_y
-            self._initialized = True
-            return self.x[0], self.x[1]
-
-        z = np.array([z_x, z_y])
-        y = z - self.H @ self.x  # innovation
-        S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x = self.x + K @ y
-        self.P = (np.eye(4) - K @ self.H) @ self.P
-        return self.x[0], self.x[1]
-
-    def reset(self):
-        """Reset filter state for new target acquisition."""
-        self.x = np.zeros(4)
-        self.P = np.diag([50.0, 50.0, 10.0, 10.0])
-        self._initialized = False
-
-    @property
-    def position(self):
-        return self.x[0], self.x[1]
-
-    @property
-    def initialized(self):
-        return self._initialized
 
 
 class ServoSmoother:
@@ -118,9 +60,10 @@ class ServoSmoother:
 
 
 class ServoController:
-    """Complete servo control pipeline: Kalman → PID → EMA → servo angles.
+    """Servo control: proportional + EMA.
 
-    Converts noisy face detections into smooth head servo commands.
+    Converts target pixel position to smooth servo angles.
+    Detection smoothing is handled upstream by SORT tracker's Kalman filters.
     """
 
     # Camera FOV in degrees (OV5647 ~62° horizontal, ~49° vertical)
@@ -138,58 +81,37 @@ class ServoController:
         self._dpx_yaw = self.H_FOV / frame_w    # ~0.097 deg/px
         self._dpx_pitch = self.V_FOV / frame_h  # ~0.102 deg/px
 
-        # Kalman filter for detection smoothing
-        self.kalman = KalmanFilter2D()
-
         # EMA smoothers for final servo commands
         self.smooth_yaw = ServoSmoother()
         self.smooth_pitch = ServoSmoother()
 
         # Proportional gain: fraction of angular error to correct per frame.
-        # Camera feedback loop provides natural damping — we apply a fraction
-        # of the error each frame and let the visual feedback close the loop.
         self._gain = 0.35
 
         # Current servo angles
         self.yaw = 0.0
         self.pitch = 0.0
 
-        self._last_time = None
-
     def update(self, face_x, face_y):
-        """Process a detection and return smoothed (yaw, pitch) servo angles.
-
-        Converts pixel error to angular error using camera FOV, applies a
-        proportional correction (gain=0.35), and smooths with EMA. The
-        camera feedback loop (servo moves → face moves in frame → error
-        decreases) provides natural damping.
+        """Convert target pixel position to smoothed servo angles.
 
         Args:
-            face_x, face_y: detected face/head center in pixel coordinates.
+            face_x, face_y: target center in pixel coordinates
+                (already smoothed by SORT tracker).
 
         Returns:
             (yaw, pitch) tuple in degrees.
         """
-        now = time()
-        dt = min(now - self._last_time, 0.2) if self._last_time else 1.0 / 15
-        self._last_time = now
-
-        # Kalman predict + update (smooths detection noise)
-        self.kalman.predict(dt)
-        smooth_x, smooth_y = self.kalman.update(face_x, face_y)
-
         # Pixel error from frame center
         cx, cy = self.frame_w / 2, self.frame_h / 2
-        ex = smooth_x - cx  # positive = face right of center
-        ey = smooth_y - cy  # positive = face below center
+        ex = face_x - cx  # positive = target right of center
+        ey = face_y - cy  # positive = target below center
 
         # Convert pixel error to angular error (degrees)
         angle_err_yaw = ex * self._dpx_yaw
         angle_err_pitch = ey * self._dpx_pitch
 
         # Apply proportional correction
-        # Face right of center → servo yaw decreases (turns right)
-        # Face below center → servo pitch decreases (tilts down)
         raw_yaw = self.yaw - self._gain * angle_err_yaw
         raw_pitch = self.pitch - self._gain * angle_err_pitch
 
@@ -203,16 +125,6 @@ class ServoController:
 
         return self.yaw, self.pitch
 
-    def predict(self):
-        """Get Kalman-predicted position without a measurement (for interpolation between detections)."""
-        if not self.kalman.initialized:
-            return None
-        now = time()
-        dt = min(now - self._last_time, 0.2) if self._last_time else 1.0 / 15
-        px, py = self.kalman.predict(dt)
-        self._last_time = now
-        return px, py
-
     def set_mode(self, mode):
         """Set tracking mode for EMA smoothers: 'lockon', 'tracking', or 'sweep'."""
         self.smooth_yaw.set_mode(mode)
@@ -220,9 +132,7 @@ class ServoController:
 
     def reset(self, yaw=0.0, pitch=0.0):
         """Reset all state for new target acquisition."""
-        self.kalman.reset()
         self.smooth_yaw.reset(yaw)
         self.smooth_pitch.reset(pitch)
         self.yaw = yaw
         self.pitch = pitch
-        self._last_time = None
