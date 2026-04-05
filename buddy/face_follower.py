@@ -28,10 +28,10 @@ FRAME_W, FRAME_H = 640, 480
 class FaceFollower:
     """Detects faces, shows live video, tracks with head servos."""
 
-    # Head servo limits
-    YAW_MIN, YAW_MAX = -80, 80
+    # Head servo limits (yaw narrowed from ±80 to ±55 to protect CSI ribbon cable)
+    YAW_MIN, YAW_MAX = -55, 55
     PITCH_MIN, PITCH_MAX = -30, 30
-    PITCH_COMP = -40
+    PITCH_COMP = -25  # Less negative = head looks more upward
 
     # Body following thresholds
     FACE_FAR = 120
@@ -43,10 +43,10 @@ class FaceFollower:
     FACE_LOST_TIMEOUT = 2.0
 
     # Sound direction
-    DEFAULT_PITCH = 20  # Look up toward humans by default
+    DEFAULT_PITCH = 30  # Look up toward humans by default (max pitch)
 
-    # Sweep fallback
-    SWEEP_MIN, SWEEP_MAX = -60, 60
+    # Sweep fallback (narrower than yaw limits to stay safe)
+    SWEEP_MIN, SWEEP_MAX = -45, 45
     SWEEP_SPEED = 10  # degrees per second
     SWEEP_TIMEOUT = 3.0  # seconds with no face/sound before sweeping
 
@@ -108,7 +108,8 @@ class FaceFollower:
             )
             self._camera.configure(cam_config)
             self._camera.start()
-            sleep(0.5)
+            # Let auto white balance and exposure settle
+            sleep(1.0)
             print("Camera started.")
 
         self._running = True
@@ -163,9 +164,7 @@ class FaceFollower:
             frame = self._latest_frame
 
         if frame is not None:
-            # Convert RGB to BGR for OpenCV display
-            display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            cv2.imshow("PiDog Camera", display)
+            cv2.imshow("PiDog Camera", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q') or key == 27:  # q or ESC
