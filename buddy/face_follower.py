@@ -533,12 +533,10 @@ class FaceFollower:
                 self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
                 now = time()
 
-                if (self.dog and not self._tracking
-                        and now - self._last_face_time > self.SWEEP_TIMEOUT
-                        and self._try_sound_direction()):
-                    self._last_sound_time = now
-                    state = 'sound'
-                elif self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
+                # Sound direction disabled — sensor fires on ambient noise / servo
+                # noise and fights with the servo thread. Person detection + sweep
+                # is sufficient for finding people.
+                if self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
                     self._tracking = False
                     self._coast_count = 0
                     with self._servo_lock:
@@ -580,7 +578,13 @@ class FaceFollower:
                 target = self._servo_target
                 mode = self._servo_mode
 
-            if target:
+            if mode == 'sweep':
+                # Sweep: detection thread sets yaw/pitch directly
+                self.dog.dog.head_move(
+                    [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
+                    immediately=True, speed=60
+                )
+            elif target:
                 tcx, tcy = target
                 if mode == 'lockon':
                     self._servo.set_mode('lockon')
@@ -615,8 +619,10 @@ class FaceFollower:
 
 
     def _sweep_step(self, dt):
-        """Advance one step of the slow yaw sweep while looking up."""
-        self._servo.set_mode('sweep')
+        """Advance one step of the slow yaw sweep while looking up.
+
+        Sets servo mode to 'sweep' — the servo thread reads yaw/pitch directly.
+        """
         self.yaw += self._sweep_direction * self.SWEEP_SPEED * dt
         if self.yaw >= self.SWEEP_MAX:
             self.yaw = self.SWEEP_MAX
@@ -625,11 +631,9 @@ class FaceFollower:
             self.yaw = self.SWEEP_MIN
             self._sweep_direction = 1
 
-        self.pitch = self.DEFAULT_PITCH
-        self.dog.dog.head_move(
-            [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
-            immediately=True, speed=60
-        )
+        self.pitch = float(self.DEFAULT_PITCH)
+        with self._servo_lock:
+            self._servo_mode = 'sweep'
 
     def _try_sound_direction(self):
         """Snap head toward detected sound. Returns True if sound was detected."""
