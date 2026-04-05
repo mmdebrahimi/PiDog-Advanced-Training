@@ -108,13 +108,19 @@ class FaceFollower:
             "tracked_people": [],
         }
 
-        # Tracking state (only accessed by tracking thread)
+        # Tracking state (accessed by detection thread)
         self._tracking = False
         self._last_face_time = 0
         self._last_sound_time = 0
         self._coast_count = 0
         self._sweep_direction = 1  # 1 = moving right, -1 = moving left
         self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
+
+        # Servo target (written by detection thread, read by servo thread)
+        self._servo_lock = threading.Lock()
+        self._servo_target = None  # (cx, cy) or None = no target
+        self._servo_mode = 'idle'  # 'lockon', 'tracking', 'sweep', 'sound', 'idle'
+        self._last_track_id = None
 
         # Camera + detectors
         self._camera = None
@@ -171,16 +177,21 @@ class FaceFollower:
             print("Camera started.")
 
         self._running = True
-        self._thread = threading.Thread(target=self._tracking_loop, daemon=True)
-        self._thread.start()
+        self._detect_thread = threading.Thread(target=self._detection_loop, daemon=True)
+        self._detect_thread.start()
+        if self.dog:
+            self._servo_thread_obj = threading.Thread(target=self._servo_loop, daemon=True)
+            self._servo_thread_obj.start()
 
         if self.show_video:
             print("Video window opening on monitor...")
 
     def stop(self):
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2)
+        if hasattr(self, '_detect_thread') and self._detect_thread:
+            self._detect_thread.join(timeout=2)
+        if hasattr(self, '_servo_thread_obj') and self._servo_thread_obj:
+            self._servo_thread_obj.join(timeout=2)
         self._tracking = False
 
     def close(self):
@@ -444,9 +455,8 @@ class FaceFollower:
 
         return frame
 
-    def _tracking_loop(self):
-        interval = 1.0 / self.LOOP_HZ
-
+    def _detection_loop(self):
+        """Detection thread: capture → detect → track → update servo target."""
         while self._running:
             t_start = time()
 
@@ -463,7 +473,7 @@ class FaceFollower:
             # Update SORT tracker with all person detections
             tracks = self._tracker.update(persons) if persons else self._tracker.update([])
 
-            # Match faces to tracks by center distance (robust to bbox timing mismatch)
+            # Match faces to tracks by center distance
             for track in tracks:
                 tid = track.id
                 tcx_t, tcy_t = track.center
@@ -472,7 +482,6 @@ class FaceFollower:
                 for fx, fy, fw, fh in faces:
                     fcx, fcy = fx + fw / 2, fy + fh / 2
                     dist = ((fcx - tcx_t) ** 2 + (fcy - tcy_t) ** 2) ** 0.5
-                    # Match if face center within half the track bbox diagonal
                     tx, ty, tw_t, th_t = track.bbox
                     max_dist = ((tw_t ** 2 + th_t ** 2) ** 0.5) / 2
                     if dist < max_dist and dist < best_dist:
@@ -481,49 +490,49 @@ class FaceFollower:
                 if best_face:
                     track.face_bbox = best_face
                     self._face_id.submit(frame, best_face, tid)
-                # Update track name from face ID results
                 result = self._face_id.get_result(tid)
                 if result and result[0]:
                     track.name = result[0]
 
+            # Update tracking state and servo target
             state = 'idle'
             if target:
                 tcx, tcy, tw = target[0], target[1], target[2]
                 self._coast_count = 0
-
                 self._face_info = {"x": tcx, "y": tcy, "w": tw, "n": len(faces)}
+
                 if not self._tracking:
-                    self._servo.set_mode('lockon')
+                    with self._servo_lock:
+                        self._servo_mode = 'lockon'
                     state = 'lockon'
                 else:
                     state = 'tracking'
                 self._tracking = True
                 self._last_face_time = time()
 
-                # Remember which track we're following for coasting
                 if tracks:
                     self._last_track_id = tracks[0].id
 
-                if self.dog:
-                    self._track_head(tcx, tcy)
+                # Set servo target (servo thread will pick this up)
+                with self._servo_lock:
+                    self._servo_target = (tcx, tcy)
+
                 if self.follow_mode and self.dog and target[3] == 'face':
                     self._follow_body(tw)
 
             elif self._tracking and self._coast_count < self.TRACK_COAST_FRAMES:
-                # No detection this frame — coast on SORT track's Kalman prediction
                 self._coast_count += 1
-                track = self._tracker.get_track(
-                    getattr(self, '_last_track_id', None))
-                if track and self.dog:
+                track = self._tracker.get_track(self._last_track_id)
+                if track:
                     cx, cy = track.center
-                    self._track_head(cx, cy)
+                    with self._servo_lock:
+                        self._servo_target = (cx, cy)
                 state = 'coast'
 
             else:
                 self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
                 now = time()
 
-                # Sound direction: only use when truly idle (no recent detection)
                 if (self.dog and not self._tracking
                         and now - self._last_face_time > self.SWEEP_TIMEOUT
                         and self._try_sound_direction()):
@@ -532,19 +541,21 @@ class FaceFollower:
                 elif self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
                     self._tracking = False
                     self._coast_count = 0
+                    with self._servo_lock:
+                        self._servo_target = None
+                        self._servo_mode = 'idle'
                     state = 'lost'
                 elif (self.dog and not self._tracking
                       and now - max(self._last_face_time, self._last_sound_time) > self.SWEEP_TIMEOUT):
-                    self._sweep_step(interval)
+                    self._sweep_step(1.0 / max(1, self.LOOP_HZ))
                     state = 'sweep'
 
             frame_ms = (time() - t_start) * 1000
 
-            # Draw overlay and store for video display
+            # Draw overlay
             if self.show_video:
                 annotated = self._draw_overlay(frame.copy(), faces, persons, target,
                                                tracks)
-                # Show FPS on overlay
                 fps = 1000.0 / frame_ms if frame_ms > 0 else 0
                 cv2.putText(annotated, f"{fps:.0f} FPS | det {detect_ms:.0f}ms",
                            (FRAME_W - 200, 20),
@@ -552,11 +563,34 @@ class FaceFollower:
                 with self._frame_lock:
                     self._latest_frame = annotated
 
-            # Update shared state for companion thread
             self._update_shared_state(tracks)
-
-            # Log frame data
             self._log_frame(frame_ms, detect_ms, target, faces, persons, state)
+
+            # No fixed sleep — run as fast as detection allows (~10 FPS)
+
+    def _servo_loop(self):
+        """Servo thread: read target at 30 Hz, send smooth head_move commands."""
+        SERVO_HZ = 30
+        interval = 1.0 / SERVO_HZ
+
+        while self._running:
+            t_start = time()
+
+            with self._servo_lock:
+                target = self._servo_target
+                mode = self._servo_mode
+
+            if target:
+                tcx, tcy = target
+                if mode == 'lockon':
+                    self._servo.set_mode('lockon')
+                    with self._servo_lock:
+                        self._servo_mode = 'tracking'
+                self.yaw, self.pitch = self._servo.update(tcx, tcy)
+                self.dog.dog.head_move(
+                    [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
+                    immediately=True, speed=80
+                )
 
             elapsed = time() - t_start
             remaining = interval - elapsed
