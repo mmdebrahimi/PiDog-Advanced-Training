@@ -262,7 +262,8 @@ if __name__ == "__main__":
             main={"size": (640, 480), "format": "RGB888"})
         cam.configure(config)
         cam.start()
-        slp(1.0)
+        slp(2.0)  # Let auto exposure + white balance settle
+        print("Camera ready. Hold still and face the camera...")
 
         embedder = FaceEmbedder()
         database = FaceDatabase()
@@ -277,24 +278,54 @@ if __name__ == "__main__":
                 break
 
         enrolled = 0
-        for i in range(5):
+        target = 5
+        print("Position your face in the green box. Press 'q' to finish early.\n")
+
+        while enrolled < target:
             frame = cam.capture_array()
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = cascade.detectMultiScale(gray, 1.2, 5, minSize=(60, 60))
+            faces = cascade.detectMultiScale(gray, 1.1, 3, minSize=(40, 40))
+
+            display = frame.copy()
+
+            # Guide box in center
+            gx, gy, gw, gh = 180, 100, 280, 280
+            cv2.rectangle(display, (gx, gy), (gx + gw, gy + gh),
+                         (0, 255, 0), 1)
+            cv2.putText(display, "Position face here", (gx, gy - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            for (x, y, w, h) in faces:
+                cv2.rectangle(display, (x, y), (x + w, y + h), (0, 255, 255), 2)
+
+            status = f"Enrolled: {enrolled}/{target} | '{args.enroll}'"
+            cv2.putText(display, status, (10, 470),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+            cv2.imshow("Enroll Face", display)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q') or key == 27:
+                break
+
             if len(faces) > 0:
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                crop = frame[y:y+h, x:x+w]
-                emb = embedder.embed(crop)
-                database.add_face(args.enroll, emb)
-                enrolled += 1
-                print(f"  Sample {i+1}: captured ({w}x{h})")
-            else:
-                print(f"  Sample {i+1}: no face detected")
-            slp(0.6)
+                # Only capture if face is reasonably large
+                if w >= 60:
+                    crop = frame[y:y+h, x:x+w]
+                    emb = embedder.embed(crop)
+                    database.add_face(args.enroll, emb)
+                    enrolled += 1
+                    print(f"  Sample {enrolled}: captured ({w}x{h})")
+                    # Flash green
+                    cv2.rectangle(display, (0, 0), (640, 480), (0, 255, 0), 10)
+                    cv2.imshow("Enroll Face", display)
+                    cv2.waitKey(300)
+                    slp(0.3)  # Small delay between samples for variety
 
+        cv2.destroyAllWindows()
         cam.stop()
         cam.close()
-        print(f"Enrolled '{args.enroll}' with {enrolled} samples.")
+        print(f"\nEnrolled '{args.enroll}' with {enrolled} samples.")
         sys.exit(0)
 
     parser.print_help()

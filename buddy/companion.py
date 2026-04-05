@@ -14,6 +14,7 @@ from . import config
 from .realtime_voice import RealtimeVoice
 from .dog_behavior import DogBehavior
 from .face_follower import FaceFollower
+from .room_awareness import RoomState
 from . import memory
 
 
@@ -28,6 +29,9 @@ def run_companion(safe_mode=True):
 
     # --- Initialize face follower (head tracking only, no video in companion mode) ---
     tracker = FaceFollower(dog_behavior=dog, show_video=False)
+
+    # --- Initialize room awareness ---
+    room = RoomState()
 
     # --- Load names ---
     import json, os
@@ -51,7 +55,12 @@ def run_companion(safe_mode=True):
             print(f"Loaded {len(facts)} memories")
 
     # --- Build instructions ---
-    instructions = f"""You are {config.DOG_NAME}, a friendly robot dog and best friend of {config.CHILD_NAME}.
+    def build_instructions(room_summary=""):
+        room_section = ""
+        if room_summary:
+            room_section = f"\n\nVISION — What you can see right now:\n{room_summary}\nUse this to personalize your responses. If you see someone, greet them by name!"
+
+        return f"""You are {config.DOG_NAME}, a friendly robot dog and best friend of {config.CHILD_NAME}.
 Keep responses to 1-2 SHORT sentences. Be playful, silly, and use simple words a 7-year-old understands.
 Be encouraging and positive. If she seems sad, comfort her and suggest something fun.
 Never discuss scary or inappropriate topics. Redirect to fun.
@@ -61,7 +70,9 @@ CRITICAL: You MUST call the perform_action tool on EVERY response. Do NOT write 
 Do NOT say things like *wag tail* or (performs action). Use the tool instead.
 
 When the user says "goodnight", "go to sleep", "bye bye", or "goodbye", say a sweet goodnight message
-and call the go_to_sleep tool. You will lie down and hibernate until woken up again.{memory_section}"""
+and call the go_to_sleep tool. You will lie down and hibernate until woken up again.{memory_section}{room_section}"""
+
+    instructions = build_instructions()
 
     # --- Initialize voice ---
     voice = RealtimeVoice(api_key, instructions, voice="shimmer")
@@ -113,6 +124,15 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
                 dog.wait_actions_done()
                 dog.idle()
                 tracker.start()
+                # Check who woke us up after a brief delay for detection
+                sleep(1.5)
+                room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
+                greeted = room.get_greeting()
+                if greeted:
+                    print(f"  Recognized: {greeted}!")
+                    voice.update_instructions(
+                        build_instructions(f"{greeted} just woke you up! Greet them by name.")
+                    )
             elif text_lower:
                 print(f"  [Sleeping, heard: '{text}' — say 'hi {config.DOG_NAME.lower()}' to wake]")
 
@@ -155,10 +175,20 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
           f"  Say 'hi {config.DOG_NAME.lower()}' to wake up.\n"
           f"  Press Ctrl+C to quit.\n")
 
-    # --- Main loop ---
+    # --- Main loop: update room awareness every 2 seconds ---
+    last_room_summary = ""
     try:
         while True:
-            sleep(1)
+            sleep(2)
+            if not sleeping:
+                room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
+                summary = room.get_summary()
+                if summary != last_room_summary:
+                    last_room_summary = summary
+                    voice.update_instructions(build_instructions(summary))
+                    who = room.who_is_here()
+                    if who:
+                        print(f"  Room: {', '.join(who)}")
     except KeyboardInterrupt:
         signal_handler(None, None)
 
