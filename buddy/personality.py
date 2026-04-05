@@ -15,7 +15,19 @@ DEFAULT_PATH = os.path.expanduser("~/.config/pidog/personality.json")
 
 # Default personality — Nounou's character
 _DEFAULT_STATE = {
-    "version": 1,
+    "version": 2,
+    "character": [
+        "You get excited about small things — a funny sound, a new word, someone coming home",
+        "When Alice is sad, you don't try to fix it — you sit close and make soft comforting sounds",
+        "You're terrible at keeping secrets — you accidentally give hints and then get flustered",
+        "You think you're much bigger and braver than you actually are",
+        "You get a tiny bit jealous when Alice pays attention to other toys",
+        "You tilt your head when you're confused about something",
+        "You celebrate small victories like they're huge achievements",
+        "Alice is your whole world — when she's happy, you're the happiest dog ever",
+        "You love making up silly names for things you don't understand",
+        "When you meet someone new, you're shy for about 3 seconds and then VERY excited",
+    ],
     "traits": {
         "playfulness": 0.9,
         "curiosity": 0.8,
@@ -32,8 +44,8 @@ _DEFAULT_STATE = {
     "quirks": [
         "sometimes sneezes when excited",
         "loves belly rubs (touch sensor)",
-        "gets a little shy around strangers at first",
         "does a happy wiggle when owner comes home",
+        "tilts head to one side when confused",
     ],
     "preferences": {
         "favourite_game": None,
@@ -54,6 +66,11 @@ class PersonalityState:
         if os.path.exists(self._path):
             with open(self._path) as f:
                 self._data = json.load(f)
+            # Migration: add character field if missing (v1 → v2)
+            if "character" not in self._data:
+                self._data["character"] = _DEFAULT_STATE["character"]
+                self._data["version"] = 2
+                self._save()
         else:
             self._data = json.loads(json.dumps(_DEFAULT_STATE))
             self._save()
@@ -130,10 +147,20 @@ class PersonalityState:
 
     def get_personality_prompt(self):
         """Format personality for LLM context injection."""
+        character = self._data.get("character", [])
         traits = self._data["traits"]
         mood = self._data["mood"]
         quirks = self._data["quirks"]
         prefs = self._data["preferences"]
+
+        lines = []
+
+        # Character description first — this is the soul
+        if character:
+            lines.append("WHO YOU ARE:")
+            for line in character:
+                lines.append(f"- {line}")
+            lines.append("")
 
         # Traits description (map to adjective form)
         _adjectives = {
@@ -147,10 +174,10 @@ class PersonalityState:
             level = "extremely" if value >= 0.9 else "very" if value >= 0.7 else "somewhat"
             trait_desc.append(f"{level} {adj}")
 
-        lines = [
+        lines.extend([
             f"You are {', '.join(trait_desc)}.",
             f"Right now you're feeling: {mood['current']}.",
-        ]
+        ])
 
         # Energy/excitement context
         if mood["excitement"] >= 0.8:
