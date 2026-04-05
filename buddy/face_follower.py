@@ -61,6 +61,9 @@ class FaceFollower:
     # Sound direction
     DEFAULT_PITCH = 30  # Look up toward humans by default (max pitch)
 
+    # Body tracking: pitch bias when face not visible (tilt up to find face)
+    BODY_PITCH_BIAS = 15.0
+
     # Sweep fallback (narrower than yaw limits to stay safe)
     SWEEP_MIN, SWEEP_MAX = -45, 45
     SWEEP_SPEED = 10  # degrees per second
@@ -120,6 +123,7 @@ class FaceFollower:
         self._servo_lock = threading.Lock()
         self._servo_target = None  # (cx, cy) or None = no target
         self._servo_mode = 'idle'  # 'lockon', 'tracking', 'sweep', 'sound', 'idle'
+        self._servo_source = 'face'  # 'face' or 'body' — body gets upward pitch bias
         self._last_track_id = None
 
         # Camera + detectors
@@ -516,6 +520,7 @@ class FaceFollower:
                 # Set servo target (servo thread will pick this up)
                 with self._servo_lock:
                     self._servo_target = (tcx, tcy)
+                    self._servo_source = target[3]  # 'face' or 'body'
 
                 if self.follow_mode and self.dog and target[3] == 'face':
                     self._follow_body(tw)
@@ -577,6 +582,7 @@ class FaceFollower:
             with self._servo_lock:
                 target = self._servo_target
                 mode = self._servo_mode
+                source = self._servo_source
 
             if mode == 'sweep':
                 # Sweep: detection thread sets yaw/pitch directly
@@ -591,8 +597,15 @@ class FaceFollower:
                     with self._servo_lock:
                         self._servo_mode = 'tracking'
                 self.yaw, self.pitch = self._servo.update(tcx, tcy)
+
+                # Body tracking: add upward pitch bias since face is above frame
+                pitch_out = self.pitch
+                if source == 'body':
+                    pitch_out = min(self.PITCH_MAX,
+                                   self.pitch + self.BODY_PITCH_BIAS)
+
                 self.dog.dog.head_move(
-                    [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
+                    [[self.yaw, 0, pitch_out]], pitch_comp=self.PITCH_COMP,
                     immediately=True, speed=80
                 )
 
