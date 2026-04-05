@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import signal
+import subprocess
 from time import sleep, time
 
 from . import config
@@ -19,6 +20,11 @@ from .memory_compiler import MemoryCompiler
 from .personality import PersonalityState
 from .social_graph import SocialGraph
 from . import memory
+
+try:
+    from pidog.dual_touch import TouchStyle
+except ImportError:
+    TouchStyle = None
 
 
 def run_companion(safe_mode=True, show_video=False):
@@ -99,12 +105,34 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
         if not sleeping:
             dog.idle()
 
+    def wake_up(source="unknown"):
+        nonlocal sleeping
+        if not sleeping:
+            return
+        sleeping = False
+        print(f"\n  Waking up! (source: {source})\n")
+        dog.do_actions(["sit"])
+        dog.wait_actions_done()
+        dog.idle()
+        tracker.start()
+        sleep(1.5)
+        yaw, pitch = tracker.get_yaw_pitch()
+        room.update(tracker.get_tracked_people(), yaw, pitch)
+        greeted = room.get_greeting()
+        if greeted:
+            print(f"  Recognized: {greeted}!")
+            voice.update_instructions(
+                build_instructions(f"{greeted} just woke you up! Greet them by name.")
+            )
+        else:
+            voice.update_instructions(build_instructions("Someone just woke you up!"))
+
     def on_sleep():
         nonlocal sleeping
         sleeping = True
         tracker.stop()
         print(f"\n  {config.DOG_NAME} is going to sleep...\n")
-        print(f"  Say 'hi {config.DOG_NAME.lower()}' to wake up.\n")
+        print(f"  Pat my head or say 'hi {config.DOG_NAME.lower()}' to wake up.\n")
         sleep(3)  # Let the goodbye audio finish playing
         dog.do_actions(["lie"])
         dog.wait_actions_done()
@@ -125,22 +153,7 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             has_name = any(n in text_lower for n in name_variants)
 
             if has_greeting and has_name:
-                sleeping = False
-                print(f"\n  Waking up! (heard: '{text}')\n")
-                dog.do_actions(["sit"])
-                dog.wait_actions_done()
-                dog.idle()
-                tracker.start()
-                # Check who woke us up after a brief delay for detection
-                sleep(1.5)
-                yaw, pitch = tracker.get_yaw_pitch()
-                room.update(tracker.get_tracked_people(), yaw, pitch)
-                greeted = room.get_greeting()
-                if greeted:
-                    print(f"  Recognized: {greeted}!")
-                    voice.update_instructions(
-                        build_instructions(f"{greeted} just woke you up! Greet them by name.")
-                    )
+                wake_up(source=f"voice: '{text}'")
             elif text_lower:
                 print(f"  [Sleeping, heard: '{text}' — say 'hi {config.DOG_NAME.lower()}' to wake]")
 
@@ -190,6 +203,14 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # --- Set volume to max ---
+    try:
+        subprocess.run(['pactl', 'set-sink-volume', '@DEFAULT_SINK@', '100%'],
+                      capture_output=True, timeout=5)
+        print("Volume: 100%")
+    except Exception:
+        pass
+
     # --- Startup ---
     print(f"\nStarting {config.DOG_NAME}...")
     dog.sit()
@@ -223,7 +244,19 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
                 sleep(0.5)
 
             now = time()
-            if sleeping or now - last_room_update < ROOM_UPDATE_INTERVAL:
+
+            # During sleep: poll touch sensor for head pat wake
+            if sleeping:
+                if TouchStyle is not None:
+                    try:
+                        touch = dog.dog.dual_touch.read()
+                        if touch == TouchStyle.FRONT_TO_REAR:
+                            wake_up(source="head pat")
+                    except Exception:
+                        pass
+                continue
+
+            if now - last_room_update < ROOM_UPDATE_INTERVAL:
                 continue
             last_room_update = now
 
