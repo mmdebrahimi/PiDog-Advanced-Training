@@ -18,7 +18,7 @@ from .room_awareness import RoomState
 from . import memory
 
 
-def run_companion(safe_mode=True):
+def run_companion(safe_mode=True, show_video=False):
     api_key = config.load_api_key()
     print(f"API key loaded.")
 
@@ -27,8 +27,8 @@ def run_companion(safe_mode=True):
     dog = DogBehavior(safe_mode=safe_mode)
     print(f"Safe mode: {'ON' if safe_mode else 'OFF'}")
 
-    # --- Initialize face follower (head tracking only, no video in companion mode) ---
-    tracker = FaceFollower(dog_behavior=dog, show_video=False)
+    # --- Initialize face follower ---
+    tracker = FaceFollower(dog_behavior=dog, show_video=show_video)
 
     # --- Initialize room awareness ---
     room = RoomState()
@@ -175,14 +175,28 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
           f"  Say 'hi {config.DOG_NAME.lower()}' to wake up.\n"
           f"  Press Ctrl+C to quit.\n")
 
-    # --- Main loop: update room awareness every 2 seconds ---
+    # --- Main loop: update room awareness ---
     last_room_summary = ""
     last_instruction_time = 0
     last_who_printed = []
+    last_room_update = 0
     INSTRUCTION_INTERVAL = 10.0  # Min seconds between LLM instruction updates
+    ROOM_UPDATE_INTERVAL = 2.0
     try:
         while True:
-            sleep(2)
+            # Pump video window if enabled (needs ~30Hz for responsive display)
+            if show_video:
+                if not tracker.update_video():
+                    break
+                sleep(0.03)
+            else:
+                sleep(0.5)
+
+            now = time()
+            if sleeping or now - last_room_update < ROOM_UPDATE_INTERVAL:
+                continue
+            last_room_update = now
+
             if not sleeping:
                 room.update(tracker.get_tracked_people(), tracker.yaw, tracker.pitch)
                 who = room.who_is_here()
@@ -211,9 +225,11 @@ def main():
     parser = argparse.ArgumentParser(description=f"PiDog Companion")
     parser.add_argument("--no-safe", action="store_true",
                         help="Disable safe mode (allow walking — put dog on floor!)")
+    parser.add_argument("--video", action="store_true",
+                        help="Show camera feed on HDMI monitor")
     args = parser.parse_args()
 
-    run_companion(safe_mode=not args.no_safe)
+    run_companion(safe_mode=not args.no_safe, show_video=args.video)
 
 
 if __name__ == "__main__":

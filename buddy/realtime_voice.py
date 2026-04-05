@@ -152,7 +152,10 @@ class RealtimeVoice:
                 asyncio.run_coroutine_threadsafe(
                     self._conn.send({
                         "type": "session.update",
-                        "session": {"instructions": instructions}
+                        "session": {
+                            "type": "realtime",
+                            "instructions": instructions,
+                        }
                     }), self._loop
                 )
         except RuntimeError:
