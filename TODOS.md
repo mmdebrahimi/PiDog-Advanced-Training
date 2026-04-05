@@ -15,13 +15,18 @@
 - [x] Realtime API voice working (sub-second latency, function calling)
 - [x] Actions execute on real dog via tool calls (wag tail, sit, bark, etc.)
 - [x] Dog name set to Nounou, child name Alice
+- [x] Integrate face tracking into companion.py (with sound direction + sweep)
+- [x] Person detection (TFLite SSD + Haar face + SORT tracker)
+- [x] Face identification (SFace embeddings + JSON database)
+- [x] Room awareness (who's here → LLM context injection)
+- [x] Voice commands: who_is_here, remember_face
+- [x] Detection/servo thread split (10 FPS detection + 30 Hz servo)
+- [x] CSI camera working (OV5647 via picamera2)
 - [ ] Fix wake-from-sleep (WebSocket may stop transcribing after go_to_sleep)
 - [ ] Verify long-term memory persistence across sessions
-- [ ] I2S speaker doesn't produce audio — investigate or accept HDMI
-- [ ] CSI camera not detected — check ribbon cable or accept USB webcam
-- [ ] Test face tracking with real face (face_follower.py built but untested)
-- [x] Integrate face tracking into companion.py (with sound direction + sweep)
-- [ ] Daughter's first full interaction
+- [ ] I2S speaker confirmed not working on this HAT revision — add Bluetooth speaker
+- [ ] Enroll Alice's face and test first full interaction
+- [ ] Add Bluetooth speaker for audio from the dog itself
 
 ## Future optimization (after baseline training succeeds)
 - [ ] Add VecNormalize if explained_variance stays below 0.4

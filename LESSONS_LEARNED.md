@@ -25,3 +25,8 @@
 - **`vcgencmd get_camera` doesn't detect libcamera-based cameras** — on newer Pi OS, use `rpicam-hello --list-cameras` instead. The CSI camera can show `detected=0` in vcgencmd while working fine via libcamera/picamera2.
 - **Picamera2 RGB888 on OV5647 CSI outputs BGR, not RGB** — despite requesting `format: "RGB888"`, the frames are actually BGR. Don't `cvtColor(RGB2BGR)` for OpenCV display — just pass frames directly to `imshow()`.
 - **CSI ribbon cable limits yaw range** — ±80° yaw pulled the ribbon cable loose, causing I/O errors. Keep yaw ≤±55° and sweep ≤±45° for cable safety.
+- **Dual Kalman filters cause prediction divergence** — servo controller + SORT tracker each had their own Kalman filter. During coasting (no detection), they predicted independently and diverged. Fix: let SORT be the single source of truth for position smoothing; servo only needs proportional + EMA.
+- **PulseAudio device indices change across reboots** — hardcoding `device=9` broke after reboot when pulse moved to index 8. Always auto-detect by searching for the device name containing "pulse".
+- **OpenAI Realtime API session.update requires `type: "realtime"`** — sending `session.update` without the `type` field gives "Missing required parameter" error. Also, `conn.send()` expects a dict, not a JSON string.
+- **Per-frame CSV logging is essential for servo tuning** — without logs, debugging tracking jitter is guesswork. The log analysis that found sound direction ping-ponging (110° jumps) and tracking→idle oscillation saved hours of trial-and-error.
+- **`ai-edge-litert` replaces `tflite-runtime` for Python 3.13** — Google renamed the package. `tflite-runtime` has no Python 3.13 wheels; `ai-edge-litert` does (ARM64 included).
