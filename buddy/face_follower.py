@@ -54,6 +54,7 @@ class FaceFollower:
     # Timing
     LOOP_HZ = 20
     FACE_LOST_TIMEOUT = 2.0
+    TRACK_COAST_FRAMES = 5  # Keep tracking via Kalman prediction when detection drops
 
     # Sound direction
     DEFAULT_PITCH = 30  # Look up toward humans by default (max pitch)
@@ -100,6 +101,7 @@ class FaceFollower:
         self._tracking = False
         self._last_face_time = 0
         self._last_sound_time = 0
+        self._coast_count = 0  # Frames without detection while coasting on Kalman
         self._sweep_direction = 1  # 1 = moving right, -1 = moving left
         self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
 
@@ -266,15 +268,23 @@ class FaceFollower:
         return self._detect_haar(frame)
 
     def _detect_tflite(self, frame):
-        """Two-stage: PersonDetector → FaceDetector on each person ROI → HeadEstimator."""
+        """Two-stage: PersonDetector → FaceDetector on each person ROI → HeadEstimator.
+
+        Face detection (Haar) only runs every 3rd frame to improve FPS.
+        Person detection + head estimation runs every frame.
+        """
         persons = self._person_detector.detect(frame)
         all_faces = []
         target = None
 
+        # Run face detection less often (it's slow on top of TFLite)
+        self._tflite_frame_count = getattr(self, '_tflite_frame_count', 0) + 1
+        run_face = (self._tflite_frame_count % 3 == 0)
+
         for person in persons:
             px, py, pw, ph = person[:4]
             roi = (px, py, pw, ph)
-            faces = self._face_detector.detect(frame, roi=roi)
+            faces = self._face_detector.detect(frame, roi=roi) if run_face else []
             all_faces.extend(faces)
 
             if faces:
@@ -379,6 +389,7 @@ class FaceFollower:
             state = 'idle'
             if target:
                 tcx, tcy, tw = target[0], target[1], target[2]
+                self._coast_count = 0
 
                 self._face_info = {"x": tcx, "y": tcy, "w": tw, "n": len(faces)}
                 if not self._tracking:
@@ -393,15 +404,28 @@ class FaceFollower:
                     self._track_head(tcx, tcy)
                 if self.follow_mode and self.dog and target[3] == 'face':
                     self._follow_body(tw)
+
+            elif self._tracking and self._coast_count < self.TRACK_COAST_FRAMES:
+                # No detection this frame — coast on Kalman prediction
+                self._coast_count += 1
+                predicted = self._servo.predict()
+                if predicted and self.dog:
+                    self._track_head(predicted[0], predicted[1])
+                state = 'coast'
+
             else:
                 self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
                 now = time()
 
-                if self.dog and self._try_sound_direction():
+                # Sound direction: only use when truly idle (no recent detection)
+                if (self.dog and not self._tracking
+                        and now - self._last_face_time > self.SWEEP_TIMEOUT
+                        and self._try_sound_direction()):
                     self._last_sound_time = now
                     state = 'sound'
                 elif self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
                     self._tracking = False
+                    self._coast_count = 0
                     state = 'lost'
                 elif (self.dog and not self._tracking
                       and now - max(self._last_face_time, self._last_sound_time) > self.SWEEP_TIMEOUT):
