@@ -14,6 +14,8 @@ Standalone:
 """
 
 import threading
+import csv
+import os
 import cv2
 import numpy as np
 from time import sleep, time
@@ -61,18 +63,26 @@ class FaceFollower:
     SWEEP_SPEED = 10  # degrees per second
     SWEEP_TIMEOUT = 3.0  # seconds with no face/sound before sweeping
 
-    def __init__(self, dog_behavior=None, show_video=True, detector='auto'):
+    def __init__(self, dog_behavior=None, show_video=True, detector='auto',
+                 log=False):
         """
         Args:
             dog_behavior: DogBehavior instance (None = video only, no head tracking)
             show_video: Show live video window on HDMI monitor
             detector: 'auto' (TFLite if available), 'tflite', or 'haar'
+            log: Write per-frame CSV log to ~/pidog_lab/logs/
         """
         self.dog = dog_behavior
         self.show_video = show_video
         self.follow_mode = False
         self._running = False
         self._thread = None
+
+        # Logging
+        self._log_file = None
+        self._log_writer = None
+        if log:
+            self._init_log()
 
         # Servo controller (Kalman + PID + EMA)
         self._servo = ServoController(
@@ -160,6 +170,51 @@ class FaceFollower:
             self._camera.stop()
             self._camera.close()
             self._camera = None
+        if self._log_file:
+            self._log_file.close()
+            print(f"Log saved: {self._log_path}")
+
+    def _init_log(self):
+        log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        from datetime import datetime
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self._log_path = os.path.join(log_dir, f'track_{ts}.csv')
+        self._log_file = open(self._log_path, 'w', newline='')
+        self._log_writer = csv.writer(self._log_file)
+        self._log_writer.writerow([
+            'time', 'frame_ms', 'detect_ms',
+            'n_persons', 'n_faces', 'target_src',
+            'target_x', 'target_y', 'target_w',
+            'yaw', 'pitch', 'yaw_delta', 'pitch_delta',
+            'state', 'sound_dir',
+        ])
+        self._log_start = time()
+        self._prev_yaw = 0.0
+        self._prev_pitch = 0.0
+        print(f"Logging to {self._log_path}")
+
+    def _log_frame(self, frame_ms, detect_ms, target, faces, persons, state,
+                   sound_dir=-1):
+        if not self._log_writer:
+            return
+        t = time() - self._log_start
+        yaw_d = self.yaw - self._prev_yaw
+        pitch_d = self.pitch - self._prev_pitch
+        self._prev_yaw = self.yaw
+        self._prev_pitch = self.pitch
+        self._log_writer.writerow([
+            f'{t:.3f}', f'{frame_ms:.1f}', f'{detect_ms:.1f}',
+            len(persons), len(faces),
+            target[3] if target else '',
+            f'{target[0]:.0f}' if target else '',
+            f'{target[1]:.0f}' if target else '',
+            f'{target[2]:.0f}' if target else '',
+            f'{self.yaw:.2f}', f'{self.pitch:.2f}',
+            f'{yaw_d:.2f}', f'{pitch_d:.2f}',
+            state, sound_dir,
+        ])
+        self._log_file.flush()
 
     def set_follow_mode(self, enabled):
         self.follow_mode = enabled
@@ -317,14 +372,20 @@ class FaceFollower:
                 sleep(0.1)
                 continue
 
+            t_detect = time()
             target, faces, persons = self._detect(frame)
+            detect_ms = (time() - t_detect) * 1000
 
+            state = 'idle'
             if target:
                 tcx, tcy, tw = target[0], target[1], target[2]
 
                 self._face_info = {"x": tcx, "y": tcy, "w": tw, "n": len(faces)}
                 if not self._tracking:
                     self._servo.set_mode('lockon')
+                    state = 'lockon'
+                else:
+                    state = 'tracking'
                 self._tracking = True
                 self._last_face_time = time()
 
@@ -338,17 +399,30 @@ class FaceFollower:
 
                 if self.dog and self._try_sound_direction():
                     self._last_sound_time = now
+                    state = 'sound'
                 elif self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
                     self._tracking = False
+                    state = 'lost'
                 elif (self.dog and not self._tracking
                       and now - max(self._last_face_time, self._last_sound_time) > self.SWEEP_TIMEOUT):
                     self._sweep_step(interval)
+                    state = 'sweep'
+
+            frame_ms = (time() - t_start) * 1000
 
             # Draw overlay and store for video display
             if self.show_video:
                 annotated = self._draw_overlay(frame.copy(), faces, persons, target)
+                # Show FPS on overlay
+                fps = 1000.0 / frame_ms if frame_ms > 0 else 0
+                cv2.putText(annotated, f"{fps:.0f} FPS | det {detect_ms:.0f}ms",
+                           (FRAME_W - 200, 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
                 with self._frame_lock:
                     self._latest_frame = annotated
+
+            # Log frame data
+            self._log_frame(frame_ms, detect_ms, target, faces, persons, state)
 
             elapsed = time() - t_start
             remaining = interval - elapsed
@@ -429,6 +503,8 @@ if __name__ == "__main__":
     parser.add_argument("--detector", choices=["auto", "tflite", "haar"],
                         default="auto",
                         help="Detection mode: auto (TFLite if available), tflite, haar")
+    parser.add_argument("--log", action="store_true",
+                        help="Write per-frame CSV log to ~/pidog_lab/logs/")
     args = parser.parse_args()
 
     dog = None
@@ -441,7 +517,7 @@ if __name__ == "__main__":
         sleep(1)
 
     tracker = FaceFollower(dog_behavior=dog, show_video=not args.no_video,
-                           detector=args.detector)
+                           detector=args.detector, log=args.log)
 
     try:
         tracker.start()
