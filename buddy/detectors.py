@@ -159,14 +159,20 @@ class FaceDetector:
 class HeadEstimator:
     """Estimate head position from a person bounding box when no face is detected.
 
-    Heuristic: the head is at the top ~12% of the person bounding box.
+    When the camera sees a body but not the face, the head is ABOVE the
+    visible bbox. We aim above the top of the bbox to tilt the camera up
+    and bring the face into view.
     """
 
-    HEAD_FRACTION = 0.12  # Head occupies top 12% of person bbox
+    # How far above the bbox top to aim (fraction of bbox height)
+    # 0.3 = aim 30% of the person's height above the top of the bbox
+    ABOVE_FRACTION = 0.3
 
     @staticmethod
     def estimate(person_bbox):
         """Estimate head center from person bounding box.
+
+        Aims above the bbox to tilt camera up toward the face.
 
         Args:
             person_bbox: (x, y, w, h) of detected person.
@@ -176,5 +182,6 @@ class HeadEstimator:
         """
         px, py, pw, ph = person_bbox[:4]
         head_cx = px + pw // 2
-        head_cy = py + int(ph * HeadEstimator.HEAD_FRACTION)
+        # Aim above the top of the bbox — the face is higher than the body
+        head_cy = max(0, py - int(ph * HeadEstimator.ABOVE_FRACTION))
         return head_cx, head_cy
