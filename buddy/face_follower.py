@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from time import sleep, time
 from picamera2 import Picamera2
+from .servo_controller import ServoController
 
 CASCADE_PATHS = [
     "/opt/vilib/haarcascade_frontalface_default.xml",
@@ -31,10 +32,6 @@ class FaceFollower:
     YAW_MIN, YAW_MAX = -80, 80
     PITCH_MIN, PITCH_MAX = -30, 30
     PITCH_COMP = -40
-
-    # Tracking gains
-    YAW_GAIN = 0.5
-    PITCH_GAIN = 1.0
 
     # Body following thresholds
     FACE_FAR = 120
@@ -65,9 +62,17 @@ class FaceFollower:
         self._running = False
         self._thread = None
 
-        # Head state
-        self.yaw = 0
-        self.pitch = self.DEFAULT_PITCH
+        # Servo controller (Kalman + PID + EMA)
+        self._servo = ServoController(
+            FRAME_W, FRAME_H,
+            yaw_limits=(self.YAW_MIN, self.YAW_MAX),
+            pitch_limits=(self.PITCH_MIN, self.PITCH_MAX),
+        )
+        self._servo.reset(yaw=0.0, pitch=self.DEFAULT_PITCH)
+
+        # Head state (kept in sync with servo controller for external access)
+        self.yaw = 0.0
+        self.pitch = float(self.DEFAULT_PITCH)
 
         # Tracking state
         self._tracking = False
@@ -138,8 +143,9 @@ class FaceFollower:
         return self._face_info.copy()
 
     def center_head(self):
-        self.yaw = 0
-        self.pitch = self.DEFAULT_PITCH
+        self.yaw = 0.0
+        self.pitch = float(self.DEFAULT_PITCH)
+        self._servo.reset(yaw=0.0, pitch=float(self.DEFAULT_PITCH))
         if self.dog:
             self.dog.dog.head_move(
                 [[0, 0, self.DEFAULT_PITCH]], pitch_comp=self.PITCH_COMP,
@@ -218,6 +224,8 @@ class FaceFollower:
                 face_cy = fy + fh // 2
 
                 self._face_info = {"x": face_cx, "y": face_cy, "w": fw, "n": len(faces)}
+                if not self._tracking:
+                    self._servo.set_mode('lockon')
                 self._tracking = True
                 self._last_face_time = time()
 
@@ -250,25 +258,10 @@ class FaceFollower:
                 sleep(remaining)
 
     def _track_head(self, face_x, face_y):
-        ex = face_x - FRAME_W // 2
-        ey = face_y - FRAME_H // 2
-
-        if ex > 15 and self.yaw > self.YAW_MIN:
-            self.yaw -= self.YAW_GAIN * int(ex / 30.0 + 0.5)
-        elif ex < -15 and self.yaw < self.YAW_MAX:
-            self.yaw += self.YAW_GAIN * int(-ex / 30.0 + 0.5)
-
-        if ey > 25:
-            self.pitch -= self.PITCH_GAIN * int(ey / 50 + 0.5)
-        elif ey < -25:
-            self.pitch += self.PITCH_GAIN * int(-ey / 50 + 0.5)
-
-        self.yaw = max(self.YAW_MIN, min(self.YAW_MAX, self.yaw))
-        self.pitch = max(self.PITCH_MIN, min(self.PITCH_MAX, self.pitch))
-
+        self.yaw, self.pitch = self._servo.update(face_x, face_y)
         self.dog.dog.head_move(
             [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
-            immediately=True, speed=100
+            immediately=True, speed=80
         )
 
     def _follow_body(self, face_w):
@@ -283,6 +276,7 @@ class FaceFollower:
 
     def _sweep_step(self, dt):
         """Advance one step of the slow yaw sweep while looking up."""
+        self._servo.set_mode('sweep')
         self.yaw += self._sweep_direction * self.SWEEP_SPEED * dt
         if self.yaw >= self.SWEEP_MAX:
             self.yaw = self.SWEEP_MAX
@@ -315,7 +309,8 @@ class FaceFollower:
             yaw = 360 - direction
 
         self.yaw = max(self.YAW_MIN, min(self.YAW_MAX, yaw))
-        self.pitch = self.DEFAULT_PITCH
+        self.pitch = float(self.DEFAULT_PITCH)
+        self._servo.reset(yaw=self.yaw, pitch=self.pitch)
 
         self.dog.dog.head_move(
             [[self.yaw, 0, self.pitch]], pitch_comp=self.PITCH_COMP,
