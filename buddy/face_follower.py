@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Face detection, head tracking, and person following for PiDog.
 
-Uses picamera2 + OpenCV Haar cascade for face detection.
-Shows live video with face detection overlay on the HDMI monitor.
-Head servos track the detected face. Optional body following.
+Two-stage detection pipeline:
+  1. PersonDetector (TFLite SSD) finds people in frame
+  2. FaceDetector (Haar cascade) finds faces within person ROIs
+  3. HeadEstimator infers head position when face not visible
+
+Falls back to Haar-only if TFLite is unavailable.
 
 Standalone:
     python3 -m buddy.face_follower              # With dog + video
@@ -16,6 +19,14 @@ import numpy as np
 from time import sleep, time
 from picamera2 import Picamera2
 from .servo_controller import ServoController
+
+# Try to import TFLite-based detectors; fall back to Haar-only
+try:
+    from .detectors import PersonDetector, FaceDetector, HeadEstimator
+    _TFLITE_AVAILABLE = True
+except (ImportError, RuntimeError) as e:
+    _TFLITE_AVAILABLE = False
+    print(f"TFLite detectors unavailable ({e}), using Haar cascade only.")
 
 CASCADE_PATHS = [
     "/opt/vilib/haarcascade_frontalface_default.xml",
@@ -50,11 +61,12 @@ class FaceFollower:
     SWEEP_SPEED = 10  # degrees per second
     SWEEP_TIMEOUT = 3.0  # seconds with no face/sound before sweeping
 
-    def __init__(self, dog_behavior=None, show_video=True):
+    def __init__(self, dog_behavior=None, show_video=True, detector='auto'):
         """
         Args:
             dog_behavior: DogBehavior instance (None = video only, no head tracking)
             show_video: Show live video window on HDMI monitor
+            detector: 'auto' (TFLite if available), 'tflite', or 'haar'
         """
         self.dog = dog_behavior
         self.show_video = show_video
@@ -81,19 +93,34 @@ class FaceFollower:
         self._sweep_direction = 1  # 1 = moving right, -1 = moving left
         self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
 
-        # Camera + detector
+        # Camera + detectors
         self._camera = None
-        self._cascade = None
         self._latest_frame = None
         self._frame_lock = threading.Lock()
 
-        # Load Haar cascade
+        # Initialize detection pipeline
+        use_tflite = (detector == 'tflite' or
+                      (detector == 'auto' and _TFLITE_AVAILABLE))
+        if use_tflite and _TFLITE_AVAILABLE:
+            self._person_detector = PersonDetector()
+            self._face_detector = FaceDetector()
+            self._use_tflite = True
+            print("Detection: TFLite person + Haar face (two-stage)")
+        else:
+            self._person_detector = None
+            self._face_detector = None
+            self._use_tflite = False
+            print("Detection: Haar cascade only")
+
+        # Haar cascade fallback (used when TFLite unavailable or as face detector)
+        self._cascade = None
         for path in CASCADE_PATHS:
             self._cascade = cv2.CascadeClassifier(path)
             if not self._cascade.empty():
                 break
         else:
-            raise RuntimeError("Haar cascade model not found.")
+            if not self._use_tflite:
+                raise RuntimeError("Haar cascade model not found.")
 
     def start(self):
         """Start camera, face detection, and video display."""
@@ -171,23 +198,99 @@ class FaceFollower:
             return False
         return True
 
-    def _detect_faces(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    def _detect(self, frame):
+        """Run detection pipeline. Returns (target, faces, persons).
+
+        target: (cx, cy, w, source) or None — what to track.
+            source is 'face' or 'body' (for overlay info).
+        faces: list of (x, y, w, h) face bounding boxes.
+        persons: list of (x, y, w, h, conf) person bounding boxes (empty if Haar-only).
+        """
+        if self._use_tflite:
+            return self._detect_tflite(frame)
+        return self._detect_haar(frame)
+
+    def _detect_tflite(self, frame):
+        """Two-stage: PersonDetector → FaceDetector on each person ROI → HeadEstimator."""
+        persons = self._person_detector.detect(frame)
+        all_faces = []
+        target = None
+
+        for person in persons:
+            px, py, pw, ph = person[:4]
+            roi = (px, py, pw, ph)
+            faces = self._face_detector.detect(frame, roi=roi)
+            all_faces.extend(faces)
+
+            if faces:
+                # Pick largest face in this person's ROI
+                largest = max(faces, key=lambda f: f[2] * f[3])
+                fx, fy, fw, fh = largest
+                cx, cy = fx + fw // 2, fy + fh // 2
+                # Keep the best (largest face) across all persons
+                if target is None or fw * fh > target[2] ** 2:
+                    target = (cx, cy, fw, 'face')
+            elif target is None:
+                # No face in this person — estimate head position
+                hx, hy = HeadEstimator.estimate(person)
+                target = (hx, hy, pw, 'body')
+
+        # If no persons detected by TFLite, try Haar on full frame as fallback
+        if not persons and self._cascade is not None:
+            _, faces_fallback, _ = self._detect_haar(frame)
+            if faces_fallback:
+                all_faces = faces_fallback
+                largest = max(faces_fallback, key=lambda f: f[2] * f[3])
+                fx, fy, fw, fh = largest
+                target = (fx + fw // 2, fy + fh // 2, fw, 'face')
+
+        return target, all_faces, persons
+
+    def _detect_haar(self, frame):
+        """Haar cascade on full frame (fallback mode)."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(gray, (320, 240))
-        faces = self._cascade.detectMultiScale(
+        faces_raw = self._cascade.detectMultiScale(
             small, scaleFactor=1.2, minNeighbors=5, minSize=(30, 30)
         )
-        return [(x * 2, y * 2, w * 2, h * 2) for (x, y, w, h) in faces]
+        faces = [(x * 2, y * 2, w * 2, h * 2) for (x, y, w, h) in faces_raw]
 
-    def _draw_overlay(self, frame, faces):
-        """Draw face rectangles and tracking info on frame."""
+        target = None
+        if faces:
+            largest = max(faces, key=lambda f: f[2] * f[3])
+            fx, fy, fw, fh = largest
+            target = (fx + fw // 2, fy + fh // 2, fw, 'face')
+
+        return target, faces, []
+
+    def _draw_overlay(self, frame, faces, persons=None, target=None):
+        """Draw detection rectangles and tracking info on frame."""
+        # Person bounding boxes (blue)
+        if persons:
+            for p in persons:
+                px, py, pw, ph = p[:4]
+                conf = p[4] if len(p) > 4 else 0
+                cv2.rectangle(frame, (px, py), (px + pw, py + ph), (255, 128, 0), 1)
+                cv2.putText(frame, f"Person {conf:.0%}", (px, py - 5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 128, 0), 1)
+
+        # Face bounding boxes (green)
         for (x, y, w, h) in faces:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(frame, f"Face {w}x{h}", (x, y - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
+        # Tracking target marker (yellow circle)
+        if target:
+            tcx, tcy = int(target[0]), int(target[1])
+            color = (0, 255, 255) if target[3] == 'face' else (0, 165, 255)
+            cv2.circle(frame, (tcx, tcy), 8, color, 2)
+            cv2.putText(frame, target[3], (tcx + 12, tcy + 4),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
         # Status bar
-        status = f"Faces: {len(faces)} | Yaw: {self.yaw:+.0f} | Pitch: {self.pitch:+.0f}"
+        mode = "TFLite" if self._use_tflite else "Haar"
+        status = f"{mode} | Faces: {len(faces)} | Yaw: {self.yaw:+.0f} | Pitch: {self.pitch:+.0f}"
         if self._tracking:
             status += " | TRACKING"
         if self.follow_mode:
@@ -214,30 +317,26 @@ class FaceFollower:
                 sleep(0.1)
                 continue
 
-            faces = self._detect_faces(frame)
+            target, faces, persons = self._detect(frame)
 
-            if faces:
-                largest = max(faces, key=lambda f: f[2] * f[3])
-                fx, fy, fw, fh = largest
-                face_cx = fx + fw // 2
-                face_cy = fy + fh // 2
+            if target:
+                tcx, tcy, tw = target[0], target[1], target[2]
 
-                self._face_info = {"x": face_cx, "y": face_cy, "w": fw, "n": len(faces)}
+                self._face_info = {"x": tcx, "y": tcy, "w": tw, "n": len(faces)}
                 if not self._tracking:
                     self._servo.set_mode('lockon')
                 self._tracking = True
                 self._last_face_time = time()
 
                 if self.dog:
-                    self._track_head(face_cx, face_cy)
-                if self.follow_mode and self.dog:
-                    self._follow_body(fw)
+                    self._track_head(tcx, tcy)
+                if self.follow_mode and self.dog and target[3] == 'face':
+                    self._follow_body(tw)
             else:
                 self._face_info = {"x": 0, "y": 0, "w": 0, "n": 0}
                 now = time()
 
                 if self.dog and self._try_sound_direction():
-                    # Sound detected — head snapped toward voice
                     self._last_sound_time = now
                 elif self._tracking and now - self._last_face_time > self.FACE_LOST_TIMEOUT:
                     self._tracking = False
@@ -247,7 +346,7 @@ class FaceFollower:
 
             # Draw overlay and store for video display
             if self.show_video:
-                annotated = self._draw_overlay(frame.copy(), faces)
+                annotated = self._draw_overlay(frame.copy(), faces, persons, target)
                 with self._frame_lock:
                     self._latest_frame = annotated
 
@@ -327,6 +426,9 @@ if __name__ == "__main__":
                         help="Video + face detection only, no dog hardware")
     parser.add_argument("--no-video", action="store_true",
                         help="No video window (headless)")
+    parser.add_argument("--detector", choices=["auto", "tflite", "haar"],
+                        default="auto",
+                        help="Detection mode: auto (TFLite if available), tflite, haar")
     args = parser.parse_args()
 
     dog = None
@@ -338,7 +440,8 @@ if __name__ == "__main__":
         dog.sit()
         sleep(1)
 
-    tracker = FaceFollower(dog_behavior=dog, show_video=not args.no_video)
+    tracker = FaceFollower(dog_behavior=dog, show_video=not args.no_video,
+                           detector=args.detector)
 
     try:
         tracker.start()

@@ -21,3 +21,7 @@
 - **vilib `camera_start()` hangs on USB webcam** — vilib was designed for CSI cameras only. Bypass vilib and use picamera2 + OpenCV directly for face detection.
 - **Whisper hallucinates "Thanks for watching" on silence** — known bug. Filter with a hallucination blocklist. The Realtime API's server-side VAD eliminates this problem.
 - **Picamera2 can't be re-opened after `stop()` without `close()`** — `FaceFollower.start()` must check if camera already exists and reuse it, rather than creating a new `Picamera2()` instance each time. Only `close()` fully releases the camera resource.
+- **Pan-tilt servo tracking: use proportional + Kalman + EMA, not PID** — PID with pixel error as input causes overshoot because the camera feedback loop already provides damping. Map pixel error to angular error via camera FOV (62°/640px ≈ 0.097°/px), apply ~35% correction per frame, and let the visual feedback close the loop. Kalman filter handles detection noise; EMA handles servo smoothing.
+- **`vcgencmd get_camera` doesn't detect libcamera-based cameras** — on newer Pi OS, use `rpicam-hello --list-cameras` instead. The CSI camera can show `detected=0` in vcgencmd while working fine via libcamera/picamera2.
+- **Picamera2 RGB888 on OV5647 CSI outputs BGR, not RGB** — despite requesting `format: "RGB888"`, the frames are actually BGR. Don't `cvtColor(RGB2BGR)` for OpenCV display — just pass frames directly to `imshow()`.
+- **CSI ribbon cable limits yaw range** — ±80° yaw pulled the ribbon cable loose, causing I/O errors. Keep yaw ≤±55° and sweep ≤±45° for cable safety.
