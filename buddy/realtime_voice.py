@@ -49,11 +49,13 @@ PERFORM_ACTION_TOOL = {
             "actions": {
                 "type": "array",
                 "items": {"type": "string", "enum": [
-                    "forward", "backward", "lie", "stand", "sit",
+                    "forward", "backward", "turn left", "turn right", "stop",
+                    "lie", "stand", "sit", "waiting",
                     "bark", "bark harder", "pant", "howling", "wag tail",
                     "stretch", "push up", "scratch", "handshake", "high five",
                     "lick hand", "shake head", "relax neck", "nod", "think",
-                    "recall", "head down", "fluster", "surprise"
+                    "recall", "fluster", "surprise", "twist body",
+                    "doze off", "feet shake"
                 ]},
                 "description": "List of actions for the dog to perform"
             }

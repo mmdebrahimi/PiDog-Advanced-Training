@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import os
 import signal
 import subprocess
 from time import sleep, time
@@ -176,10 +177,23 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
     voice.on_remember_face(on_remember_face)
 
     # --- Graceful shutdown ---
+    _shutting_down = False
+
     def signal_handler(sig, frame):
-        print("\nShutting down...")
-        tracker.close()
-        voice.stop()
+        nonlocal _shutting_down
+        if _shutting_down:
+            print("\nForce quit!")
+            os._exit(1)
+        _shutting_down = True
+        print("\nShutting down... (press Ctrl+C again to force quit)")
+        try:
+            tracker.close()
+        except Exception:
+            pass
+        try:
+            voice.stop()
+        except Exception:
+            pass
         # Save memory + social graph + personality
         print("Saving memories...")
         transcripts = voice.get_transcripts()
@@ -196,9 +210,12 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             print("Personality state saved.")
         except Exception as e:
             print(f"Personality save error: {e}")
-        dog.close()
+        try:
+            dog.close()
+        except Exception:
+            pass
         print("Goodbye!")
-        exit(0)
+        os._exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
