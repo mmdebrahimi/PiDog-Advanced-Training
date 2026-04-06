@@ -1,0 +1,13 @@
+body_part,index,pin,joint_name,neutral_angle,direction_positive,min_safe,max_safe,notes
+legs,0,2,LF_upper,0,shoulder forward,-45,45,lie position: 45
+legs,1,3,LF_lower,0,knee extend,-45,45,lie position: -45
+legs,2,7,RF_upper,0,shoulder forward,-45,45,lie position: -45 (mirrored)
+legs,3,8,RF_lower,0,knee extend,-45,45,lie position: 45 (mirrored)
+legs,4,0,LH_upper,0,hip forward,-45,45,lie position: 45
+legs,5,1,LH_lower,0,knee extend,-45,45,lie position: -45
+legs,6,10,RH_upper,0,hip forward,-45,45,lie position: -45 (mirrored)
+legs,7,11,RH_lower,0,knee extend,-45,45,lie position: 45 (mirrored)
+head,0,4,yaw,0,turn right,-90,90,full range tested to ±60
+head,1,6,roll,0,tilt right,-70,70,full range tested to ±60
+head,2,5,pitch,0,look down,-45,30,asymmetric range; HEAD_PITCH_OFFSET=45 applied by head_move()
+tail,0,9,tail,0,wag right,-90,90,full range tested to ±60

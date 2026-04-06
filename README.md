@@ -81,7 +81,7 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
     face_id.py        # Face recognition (SFace embeddings + JSON database)
     room_awareness.py # Who's here, where last seen, LLM context
     social_graph.py   # People database (roles, relationships, interests)
-    personality.py    # Mood, traits, quirks, preferences (persistent)
+    personality.py    # Personality v3: valence-arousal emotion, needs system, event hooks (persistent)
     memory_compiler.py # Compiles all memory sources into LLM context
     memory.py         # Long-term memory + social graph session-end updates
     models/           # ONNX models (SFace, YuNet — gitignored, auto-downloaded)
@@ -134,3 +134,5 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
 | - | Voice Companion | **Working** (buddy/ — Realtime API + function calling + long-term memory) |
 | - | Person Tracking | **Working** (TFLite person + Haar face + SORT tracker + SFace face ID) |
 | - | Room Awareness | **Working** (who's here → LLM context, voice commands: "who can you see?") |
+| - | Personality v3 | **Working** (valence-arousal emotion, needs system, touch/departure/stranger hooks, care rituals) |
+| - | Safety Laws | **Working** (Three Laws in LLM prompt, volume cap at 80%) |

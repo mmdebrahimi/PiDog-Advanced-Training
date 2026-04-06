@@ -86,3 +86,44 @@
 - Start with 5 behaviors: GREET, TRACK, SEARCH, REST, SLEEP
 
 ---
+
+## [plan_file: Session_Summary_And_Next_Steps_Plan.md] 2026-04-05
+**Summary:** Complete record of person tracking + personality system built in one session, plus prioritized next steps after CEO review.
+**Key decisions:**
+- Rich hand-written character prompt (10 personality lines defining Nounou's soul)
+- Alice's first test is the top priority — her reactions are the roadmap
+- Behavior Engine deferred until after Alice feedback
+- Sound direction disabled (ambient noise), CSI cable needs physical securing
+
+---
+
+## [plan_file: Project_Critical_Review_Plan.md] 2026-04-06
+**Summary:** Critical review of all 9 plans after 4 days: what's solid, what has gaps, what's risky, and recommended priority order before Alice's first test.
+**Key decisions:**
+- Undervoltage is the #1 showstopper — fix PSU before any demo
+- USB camera needs BGR conversion (CSI cable disconnected, USB outputs RGB not BGR)
+- BT speaker before Behavior Engine (Alice needs to hear the dog)
+- No end-to-end test has completed — must run full integration before new features
+
+---
+
+## [plan_file: Personality_Soul_Upgrade_Plan.md] 2026-04-06
+**Summary:** Add needs system, continuous emotion decay, vulnerability, care rituals, and spontaneous behaviors to make Nounou feel alive — inspired by Aibo, Cozmo, Lovot, and Moflin research.
+**Key decisions:**
+- Valence-Arousal emotion model with lazy exponential decay (half-life ~140s)
+- Three needs: attention, stimulation, rest — drift upward, satisfied by interactions
+- All spontaneous behaviors map to existing ActionFlow actions (no new animations)
+- Jealousy capped at 2/session with 60s cooldown
+- Fixed arrival detection bug (on_person_seen never fired)
+
+---
+
+## [plan_file: Safety_Laws_Plan.md] 2026-04-06
+**Summary:** Translate Asimov's Three Laws of Robotics into concrete safety constraints for a robot dog companion used by a 7-year-old child.
+**Key decisions:**
+- Both symbolic (LLM prompt) and practical (code guards) implementation
+- Concrete testable constraints over abstract "do no harm" logic
+- "Through inaction" is not implementable — don't pretend the dog can protect Alice
+- Self-preservation subordinate to bonding design (vulnerability > self-defense)
+
+---

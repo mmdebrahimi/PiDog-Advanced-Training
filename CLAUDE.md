@@ -66,11 +66,13 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - RL Training: in progress on laptop (reward tuning, CUDA training)
 - Voice Companion: working via Realtime API with person tracking + room awareness
 - Person Tracking: working (TFLite + SORT + face ID + room awareness)
-- Personality/Memory: social graph + personality state + memory compiler — all working
+- Personality/Memory: social graph + personality v3 (valence-arousal emotion, needs system, event hooks) + memory compiler — all working
 - Wake from sleep: head pat wake added; voice wake depends on API still transcribing
 - Sound direction: disabled (fires on ambient noise, conflicts with servo thread)
 - All 30 ActionFlow actions available to LLM
 - Shutdown: Ctrl+C works (first=graceful, second=force quit)
-- Volume: set to 100% at startup via pactl
+- Volume: ramped 50→80% at startup (child-safe cap), never exceeds 80%
+- Safety: Asimov's Three Laws in LLM system prompt (kid-friendly)
 - Plans index: `~/pidog_lab/wiki/plans-index.md`
+- Personality v3: needs system (attention/stimulation/rest), emotion decay (exponential VA model), touch→mood, departure→sadness, stranger→shy, idle spontaneous behaviors, jealousy mechanic, enhanced sleep/wake rituals
 - Next: Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)

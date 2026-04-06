@@ -33,6 +33,7 @@ secret.py
 # Large files
 *.STEP
 *.step
+*.onnx
 
 # Cloned SunFounder dependencies (tracked separately)
 robot-hat/
