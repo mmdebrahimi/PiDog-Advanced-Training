@@ -49,8 +49,10 @@ PiDog-Advanced-Training/
 |-- pidog_env.py        Gymnasium RL environment (obs, actions, reward, termination)
 |-- train.py            PPO training, evaluation, and video rendering
 |-- sim_trot.py         Scripted diagonal trot gait (baseline comparison)
+|-- pretrain_bc.py      Behavioral cloning from scripted trot
 |-- requirements.txt    Python dependencies
 |-- DESKTOP_TRAINING.md Detailed setup and training guide
+|-- TRAINING_GUIDE.md   Diagnostics, failure modes, and tuning reference
 |-- LESSONS_LEARNED.md  Practical lessons from development
 |-- TODOS.md            Backlog and future optimization ideas
 ```
@@ -92,14 +94,14 @@ The reward encourages forward locomotion while penalizing instability:
 
 | Component | Weight | Purpose |
 |-----------|--------|---------|
-| Forward velocity | **+20.0** | Primary objective — walk forward |
+| Forward velocity | **+10.0** | Primary objective — walk forward |
 | Alive bonus | +1.0 | Survive (0 if moving backward) |
 | Energy | -0.05 | Penalize large actuator commands |
-| Orientation tilt | -2.0 | Keep torso upright |
-| Height deviation | -3.0 | Maintain ~50mm standing height |
-| Lateral velocity | -1.0 | Minimize sideways drift |
+| Orientation tilt | -5.0 | Keep torso upright (prevents tilted shuffle) |
+| Height deviation | -3.0 | Maintain ~53mm standing height |
+| Lateral velocity | -3.0 | Minimize sideways drift |
 | Vertical velocity | -1.0 | Minimize bouncing |
-| Action smoothness | -0.05 | Penalize jerky movements |
+| Action smoothness | -0.1 | Penalize jerky movements / foot vibration |
 | Termination | -10.0 | One-time penalty for falling |
 
 ### Training Configuration
@@ -110,7 +112,7 @@ The reward encourages forward locomotion while penalizing instability:
 | Network | 256-128 MLP (Tanh) | Separate actor/critic |
 | Parallel envs | 8 | SubprocVecEnv |
 | Learning rate | 3e-4 (constant) | Linear decay caused premature convergence |
-| Entropy coeff | 0.05 | High — prevents policy from collapsing to "stand still" |
+| Entropy coeff | 0.01 | Moderate exploration |
 | Rollout steps | 1024/env | 8192 total samples per update |
 | Discount | 0.99 | |
 | Control rate | 50 Hz | 10 substeps x 2ms timestep |
@@ -124,7 +126,7 @@ python sim_trot.py              # Render video of scripted trot
 python sim_trot.py --no-video   # Print stats only
 ```
 
-The scripted gait achieves ~266mm forward distance over 4 cycles while maintaining stable posture.
+The scripted gait (LIFT=40°, SWING=20°) achieves ~190mm per cycle of forward motion. Use `pretrain_bc.py` to initialize the RL policy from this gait via behavioral cloning before PPO fine-tuning.
 
 ## Deployment to Real Robot
 
@@ -138,8 +140,8 @@ scp pidog_policy.zip pidog@<PI_IP>:~/pidog_lab/sim/
 
 - **Standing pose matters:** The joint angles for standing (`[25, 35, -25, -35, 35, 35, -35, -35]` degrees) produce a ~50mm standing height, not the 120mm you might expect from straight legs. All height-related constants must use the actual standing height.
 - **Clear `__pycache__` after editing the environment:** `SubprocVecEnv` spawns separate Python processes that load cached `.pyc` files. Stale cache = training uses old code while eval uses new code.
-- **High entropy coefficient is critical:** Without `ent_coef=0.05`, the policy quickly learns to stand still (local optimum) and never discovers walking.
-- **Forward velocity reward must be high:** At ~50mm/s walking speed, a 2x coefficient earns only +0.1/step — not enough to overcome stability penalties. 20x is needed.
+- **MuJoCo ctrl expects RADIANS at runtime:** Even with `compiler angle="degree"` in the XML. Setting ctrl in degrees causes all joints to slam to ±90° limits. Use `np.radians()`.
+- **Random exploration can't discover gaits:** 15 runs of reward tuning produced only standing or shuffling. Use behavioral cloning from the scripted trot to bootstrap the policy.
 
 ## Dependencies
 

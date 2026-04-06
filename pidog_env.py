@@ -128,16 +128,16 @@ class PiDogEnv(gym.Env):
         # Extract torso up-vector from rotation matrix; penalize xy tilt
         body_xmat = self.data.xmat[self._torso_body_id].reshape(3, 3)
         up_vec = body_xmat[:, 2]
-        orientation_penalty = np.sum(np.square(up_vec[:2])) * 2.0
+        orientation_penalty = np.sum(np.square(up_vec[:2])) * 5.0  # was 2.0 — force upright
 
         height_target = 0.05  # actual standing height with STAND_DEG bent legs
         height_penalty = abs(torso_z - height_target) * 3.0
 
-        lateral_penalty = abs(lateral_vel) * 1.0
+        lateral_penalty = abs(lateral_vel) * 3.0  # was 1.0 — discourage diagonal drift
         vertical_penalty = abs(vertical_vel) * 1.0
 
         # Penalize difference from previous action to encourage smooth gaits
-        smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.05
+        smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.1  # moderate: discourages vibration without blocking movement
 
         reward = (
             5.0 * forward_vel

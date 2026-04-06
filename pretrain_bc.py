@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Pretrain PPO policy via behavioral cloning from the scripted trot gait.
 
-Generates (observation, action) pairs by running the sim_trot gait through
-PiDogEnv, then trains the policy network with supervised learning (MSE loss).
+Generates (observation, action) pairs by running the 2-phase diagonal trot
+through PiDogEnv, then trains the policy network with supervised learning.
 The pretrained weights are loaded into SB3 PPO for fine-tuning with RL.
 
 Usage:
     python pretrain_bc.py                    # Pretrain and save
     python pretrain_bc.py --eval             # Evaluate pretrained policy
-    python pretrain_bc.py --finetune=500000  # Pretrain then PPO fine-tune
+    python pretrain_bc.py --finetune=3000000 # Pretrain then PPO fine-tune
 """
 
 import argparse
@@ -23,34 +23,31 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 POLICY_PATH = os.path.join(MODEL_DIR, "pidog_policy")
 
-# Trot gait parameters (from sim_trot.py)
+# Must match pidog_env.py and sim_trot.py
 STAND_DEG = np.array([25, 35, -25, -35, 35, 35, -35, -35], dtype=np.float64)
 ACTION_RANGE = 15.0
-LIFT = 12
-SWING = 12
+LIFT = 40   # knee bend increase (matches sim_trot.py)
+SWING = 20  # hip offset (matches sim_trot.py)
+FRAME_HOLD = 10  # env steps per gait frame (200ms at 50Hz)
 
 
 def make_gait_frames():
-    """Build the 4-frame diagonal trot pattern (from sim_trot.py)."""
-    s = STAND_DEG.copy()
+    """Build the 2-frame diagonal trot (matches sim_trot.py make_gait_frames)."""
+    f1 = np.array([
+        STAND_DEG[0] - SWING, STAND_DEG[1],
+        STAND_DEG[2] - SWING, STAND_DEG[3] - LIFT,
+        STAND_DEG[4] + SWING, STAND_DEG[5] + LIFT,
+        STAND_DEG[6] + SWING, STAND_DEG[7],
+    ], dtype=np.float64)
 
-    f1 = s.copy()
-    f1[0] = s[0] - LIFT;  f1[1] = s[1] - LIFT
-    f1[6] = s[6] + LIFT;  f1[7] = s[7] + LIFT
+    f2 = np.array([
+        STAND_DEG[0] + SWING, STAND_DEG[1] + LIFT,
+        STAND_DEG[2] + SWING, STAND_DEG[3],
+        STAND_DEG[4] - SWING, STAND_DEG[5],
+        STAND_DEG[6] - SWING, STAND_DEG[7] - LIFT,
+    ], dtype=np.float64)
 
-    f2 = s.copy()
-    f2[0] = s[0] + SWING; f2[6] = s[6] - SWING
-    f2[2] = s[2] - SWING; f2[4] = s[4] - SWING
-
-    f3 = s.copy()
-    f3[2] = s[2] + LIFT;  f3[3] = s[3] + LIFT
-    f3[4] = s[4] - LIFT;  f3[5] = s[5] - LIFT
-
-    f4 = s.copy()
-    f4[2] = s[2] - SWING; f4[4] = s[4] + SWING
-    f4[0] = s[0] - SWING; f4[6] = s[6] + SWING
-
-    return [f1, f2, f3, f4]
+    return [f1, f2]
 
 
 def gait_frame_to_action(frame_deg):
@@ -59,11 +56,12 @@ def gait_frame_to_action(frame_deg):
     return np.clip(action, -1.0, 1.0).astype(np.float32)
 
 
-def collect_expert_data(n_episodes=30):
+def collect_expert_data(n_episodes=20, cycles_per_episode=5):
     """Run the scripted trot through PiDogEnv and collect (obs, action) pairs.
 
-    Each gait frame is held for 1 agent step (= 15 inner physics steps with
-    frame_skip=15, matching the 300ms frame hold in sim_trot.py).
+    Each gait frame is held for FRAME_HOLD env steps (10 steps = 200ms),
+    matching the sim_trot.py timing. The same action is repeated for all
+    10 steps within a frame hold — the policy needs to learn this pattern.
     """
     from pidog_env import PiDogEnv
 
@@ -77,14 +75,18 @@ def collect_expert_data(n_episodes=30):
     for ep in range(n_episodes):
         obs, _ = env.reset()
 
-        # Run 16 gait cycles (4 frames each = 64 agent decisions)
-        for cycle in range(16):
-            for frame_idx in range(4):
+        for cycle in range(cycles_per_episode):
+            for frame_idx in range(len(gait_frames)):
                 action = actions[frame_idx]
-                all_obs.append(obs.copy())
-                all_actions.append(action.copy())
 
-                obs, reward, terminated, truncated, _ = env.step(action)
+                # Hold this gait frame for FRAME_HOLD env steps
+                for hold_step in range(FRAME_HOLD):
+                    all_obs.append(obs.copy())
+                    all_actions.append(action.copy())
+
+                    obs, reward, terminated, truncated, _ = env.step(action)
+                    if terminated or truncated:
+                        break
                 if terminated or truncated:
                     break
             if terminated or truncated:
@@ -99,6 +101,8 @@ def collect_expert_data(n_episodes=30):
     obs_array = np.array(all_obs)
     act_array = np.array(all_actions)
     print(f"\nCollected {len(obs_array)} expert samples")
+    print(f"  Unique actions: {len(np.unique(act_array, axis=0))}")
+    print(f"  Actions mean: {act_array.mean(axis=0).round(3)}")
     return obs_array, act_array
 
 
@@ -115,7 +119,6 @@ def pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Create PPO with same architecture as train.py (single env is fine for BC)
     def make_env_fn():
         def _init():
             from pidog_env import PiDogEnv
@@ -132,20 +135,14 @@ def pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3):
     model = PPO(
         "MlpPolicy", env, verbose=0,
         policy_kwargs=policy_kwargs,
-        n_steps=128, batch_size=64, n_epochs=10,
-        learning_rate=3e-4, ent_coef=0.05,
+        n_steps=1024, batch_size=256, n_epochs=10,
+        learning_rate=3e-4, ent_coef=0.01,
         device=device,
     )
     env.close()
 
     policy = model.policy
     policy.train()
-
-    # Print expert action statistics
-    print(f"  Expert actions — mean: {act_data.mean(axis=0).round(3)}")
-    print(f"  Expert actions — std:  {act_data.std(axis=0).round(3)}")
-    unique_actions = np.unique(act_data, axis=0)
-    print(f"  Unique expert actions: {len(unique_actions)}")
 
     # Prepare data
     obs_tensor = torch.FloatTensor(obs_data).to(device)
@@ -166,7 +163,6 @@ def pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3):
         total_loss = 0
         n_batches = 0
         for obs_batch, act_batch in loader:
-            # Forward pass through actor only
             features = policy.extract_features(obs_batch, policy.pi_features_extractor)
             latent_pi = policy.mlp_extractor.forward_actor(features)
             action_mean = policy.action_net(latent_pi)
@@ -181,8 +177,7 @@ def pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3):
             n_batches += 1
 
         avg_loss = total_loss / n_batches
-        if (epoch + 1) % 50 == 0 or epoch == 0:
-            # Check what the policy actually predicts for a sample
+        if (epoch + 1) % 100 == 0 or epoch == 0:
             with torch.no_grad():
                 sample_obs = obs_tensor[:4]
                 feats = policy.extract_features(sample_obs, policy.pi_features_extractor)
@@ -192,7 +187,6 @@ def pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3):
             print(f"    Predicted: {pred[0].cpu().numpy().round(3)}")
             print(f"    Expert:    {act_tensor[0].cpu().numpy().round(3)}")
 
-    # Save the pretrained model
     model.save(POLICY_PATH)
     print(f"\nPretrained model saved to {POLICY_PATH}")
     return model
@@ -246,11 +240,11 @@ def finetune(timesteps, model_path=POLICY_PATH):
     env = SubprocVecEnv([make_env_fn() for _ in range(n_envs)])
 
     model = PPO.load(model_path, env=env, device=device)
-    # Restore training hyperparameters
-    model.ent_coef = 0.02  # lower than initial — policy is already near the trot
+    model.ent_coef = 0.02   # lower than scratch — policy already near the trot
     model.learning_rate = 1e-4  # smaller LR for fine-tuning
 
     print(f"Fine-tuning PPO for {timesteps} steps from pretrained policy...")
+    print(f"  ent_coef={model.ent_coef}, lr={model.learning_rate}")
     model.learn(total_timesteps=timesteps)
     model.save(model_path)
     print(f"Fine-tuned model saved to {model_path}")
@@ -271,11 +265,11 @@ def main():
 
     # Step 1: Collect expert data
     print("=== Collecting expert data from scripted trot ===")
-    obs_data, act_data = collect_expert_data(n_episodes=30)
+    obs_data, act_data = collect_expert_data(n_episodes=20, cycles_per_episode=5)
 
     # Step 2: Pretrain
     print("\n=== Pretraining policy via behavioral cloning ===")
-    model = pretrain_policy(obs_data, act_data, epochs=300, lr=1e-3)
+    model = pretrain_policy(obs_data, act_data, epochs=500, lr=3e-3)
 
     # Step 3: Evaluate
     print("\n=== Evaluating pretrained policy ===")
