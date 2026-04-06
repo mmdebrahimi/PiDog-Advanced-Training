@@ -7,7 +7,7 @@ with position-controlled servos.
 
 Observation space (27-dim):
   - 8 joint positions   (normalized: degrees / 45)
-  - 8 joint velocities  (normalized: rad_s / 10)
+  - 8 joint velocities  (normalized: rad/s / 10)
   - 4 torso quaternion  (w, x, y, z — raw)
   - 3 torso linear velocity (m/s — raw)
   - 3 torso angular velocity from IMU gyro (rad/s — raw)
@@ -20,7 +20,10 @@ Action space (8-dim, continuous [-1, 1]):
 Physics:
   - Simulation timestep: 2ms, 10 substeps per control step → 50Hz control rate
   - Max episode: 1000 steps (20 seconds)
-  - Standing height with STAND pose: ~0.05m (not 0.12m — legs are bent)
+  - Standing height with STAND pose: ~0.053m
+
+IMPORTANT: MuJoCo ctrl expects RADIANS at runtime, even when compiler angle="degree".
+The degree setting only affects XML attribute parsing, not runtime ctrl values.
 """
 
 import os
@@ -37,7 +40,7 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pidog.xml
 STAND_DEG = np.array([25, 35, -25, -35, 35, 35, -35, -35], dtype=np.float64)
 
 # Max deviation from STAND pose per action dimension.
-# With STAND values up to ±35 and ctrlrange=±60, this gives 10° headroom.
+# With STAND values up to ±35 and ctrlrange=±80, this gives ample headroom.
 ACTION_RANGE = 15.0
 
 
@@ -51,7 +54,7 @@ class PiDogEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(MODEL_PATH)
         self.data = mujoco.MjData(self.model)
 
-        self.n_substeps = 10       # 10 × 2ms = 20ms per control step (50Hz)
+        self.n_substeps = 10          # 10 × 2ms = 20ms per control step (50Hz)
         self.max_episode_steps = 1000  # 1000 × 20ms = 20 seconds max
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(8,), dtype=np.float32)
@@ -93,7 +96,7 @@ class PiDogEnv(gym.Env):
         gyro_dim = self.model.sensor_dim[self._gyro_sensor_id]
         torso_gyro = self.data.sensordata[gyro_adr:gyro_adr + gyro_dim].copy()
 
-        # Normalize height so ~1.0 when standing (actual height ≈ 0.05m)
+        # Normalize height so ~1.0 when standing (actual height ≈ 0.053m)
         torso_z = np.array([self.data.qpos[2] / 0.05])
 
         return np.concatenate([
@@ -108,17 +111,10 @@ class PiDogEnv(gym.Env):
     def _compute_reward(self, action, terminated):
         """Compute shaped reward encouraging forward locomotion while staying upright.
 
-        Reward components:
-          + 20.0 × forward_vel    Primary objective: walk forward (high weight
-                                  needed because robot speed is ~0.05 m/s)
-          + 1.0  alive bonus      Encourages survival (0 if moving backward)
-          - 0.05 × energy         Penalize large actuator commands (sum of squared actions)
-          - 2.0  × orientation    Penalize torso tilt (xy components of body up-vector)
-          - 3.0  × height_dev     Penalize deviation from 0.05m standing height
-          - 1.0  × lateral_vel    Discourage sideways drift
-          - 1.0  × vertical_vel   Discourage bouncing
-          - 0.05 × smoothness     Penalize jerky action changes between steps
-          - 10.0 on termination   One-time penalty for falling
+        Reward = 5x forward_vel + 1.0 alive - penalties - 10 on termination.
+
+        With working actuators (radians fix), this simple structure should work:
+        standing earns +1.0/step from alive bonus, walking earns +1.0 + velocity bonus.
         """
         forward_vel = self.data.qvel[0]
         lateral_vel = self.data.qvel[1]
@@ -144,7 +140,7 @@ class PiDogEnv(gym.Env):
         smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.05
 
         reward = (
-            20.0 * forward_vel
+            5.0 * forward_vel
             + alive
             - energy_penalty
             - orientation_penalty
@@ -173,23 +169,24 @@ class PiDogEnv(gym.Env):
         return False
 
     def reset(self, seed=None, options=None):
-        """Reset to standing pose by letting actuators settle from straight legs.
+        """Reset to standing pose with pre-set joints at correct height.
 
-        After mj_resetData, the torso starts at 0.12m with straight legs (from XML).
-        We set ctrl to STAND_DEG and simulate 250 steps (0.5s) so the position
-        actuators gradually bend the legs into the standing pose, settling at ~0.05m.
-        This matches the approach in sim_trot.py and avoids the instability caused
-        by directly setting bent-leg qpos at the wrong height.
+        Pre-sets joint angles to STAND (in radians) and torso at 0.08m,
+        then settles for 500 physics steps (1.0s) so the robot reaches
+        its natural standing height of ~0.053m.
         """
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
 
+        # Pre-set joints and height to avoid violent drop from 0.12m
+        self.data.qpos[2] = 0.08
+        self.data.qpos[7:15] = np.radians(STAND_DEG)
         self.data.qvel[:] = 0.0
-        self.data.ctrl[:] = STAND_DEG
+        self.data.ctrl[:] = np.radians(STAND_DEG)  # MuJoCo expects RADIANS
         self._last_ctrl_deg = STAND_DEG.copy()
 
-        # Settle into standing pose (250 steps × 2ms = 0.5s)
-        for _ in range(250):
+        # Settle into standing pose (500 steps × 2ms = 1.0s)
+        for _ in range(500):
             mujoco.mj_step(self.model, self.data)
 
         self._step_count = 0
@@ -197,22 +194,22 @@ class PiDogEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action):
-        """Apply action, advance physics, return (obs, reward, terminated, truncated, info).
+        """Apply action, advance physics 20ms, return (obs, reward, terminated, truncated, info).
 
         Action pipeline:
-          1. Clip action to [-1, 1]
-          2. Map to target joint angles: STAND_DEG + action × ACTION_RANGE
-          3. Smooth with previous target: 80% old + 20% new (prevents jerky movement)
-          4. Set MuJoCo ctrl and run 10 substeps (20ms of physics)
+          1. Map action [-1,1] to target joint angles: STAND_DEG ± ACTION_RANGE
+          2. Smooth with previous target: 80% old + 20% new
+          3. Convert to radians and set MuJoCo ctrl
+          4. Run 10 substeps (20ms of physics)
         """
         action = np.asarray(action, dtype=np.float32)
         prev_action = self._last_action.copy()
 
         target_ctrl_deg = STAND_DEG + action * ACTION_RANGE
 
-        # Exponential smoothing prevents sudden servo jumps (important for sim-to-real)
+        # Exponential smoothing prevents sudden servo jumps (sim-to-real friendly)
         ctrl_deg = 0.8 * self._last_ctrl_deg + 0.2 * target_ctrl_deg
-        self.data.ctrl[:] = ctrl_deg
+        self.data.ctrl[:] = np.radians(ctrl_deg)  # MuJoCo expects RADIANS
 
         for _ in range(self.n_substeps):
             mujoco.mj_step(self.model, self.data)

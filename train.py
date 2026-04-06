@@ -92,7 +92,7 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
         gamma=0.99,             # discount factor
         gae_lambda=0.95,        # GAE advantage estimation
         clip_range=0.2,         # PPO clipping
-        ent_coef=0.05,          # entropy bonus — keeps exploration alive
+        ent_coef=0.01,          # moderate entropy for exploration
         device=device,
     )
 
