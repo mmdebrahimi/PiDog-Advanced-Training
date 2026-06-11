@@ -56,18 +56,33 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - Tracking: SORT (Kalman + Hungarian), persistent IDs, face ID via SFace embeddings
 - Servo: detection thread (~10 FPS) + servo thread (30 Hz) for smooth head tracking
 - Camera: OV5647 CSI, outputs BGR despite RGB888 config. Yaw ≤±55° for cable safety.
+- Camera graceful degradation: if CSI cable is loose, companion runs without tracking (voice + actions still work)
 - Models: `buddy/models/` — SFace + YuNet auto-download from OpenCV Zoo if missing
 
 ## Git Remote
 - `origin` → `https://github.com/mmdebrahimi/PiDog-Advanced-Training.git`
 - RL training updates pushed from laptop
 
+## Behavior Engine
+- `buddy/behavior_engine.py` — priority-based state machine, ticks every 2s
+- Behaviors (highest priority wins): SLEEP > GREET > TRACK > SEARCH > REST
+- Engine sets FaceFollower mode via `tracker.set_behavior_mode('track'|'idle'|'off')`
+- LED ownership: engine owns ambient LEDs, voice callbacks own transient (speaking/thinking)
+- `engine.restore_leds()` — called by `on_speaking_end` to return to behavior LEDs
+- Sleep/wake lifecycle owned by engine: `engine.go_to_sleep()`, `engine.wake_up(source)`
+- Touch wake routes through `DogBehavior._poll_sensors` callback, not engine polling
+- Voice updates wrapped in `_update_voice()` to catch network failures
+
 ## Current Work
 - RL Training: in progress on laptop (reward tuning, CUDA training)
 - Voice Companion: working via Realtime API with person tracking + room awareness
-- Person Tracking: working (TFLite + SORT + face ID + room awareness)
-- Personality/Memory: social graph + personality v3 (valence-arousal emotion, needs system, event hooks) + memory compiler — all working
-- Wake from sleep: head pat wake added; voice wake depends on API still transcribing
+- Behavior Engine: working (GREET/TRACK/SEARCH/REST/SLEEP, LED ownership, sleep/wake)
+- Person Tracking: working (YuNet-first + TFLite fallback + MOSSE inter-frame + SORT + face ID)
+- Memory v2: semantic (per-person facts + dedup + topics) + episodic (session summaries) + combined single-call extraction
+- Smart Arrivals: identity-aware GREET (Alice=excited bark, family=warm, known=friendly, stranger=shy→curious)
+- Door watching: REST behavior points head at saved door direction when alone
+- Personality: v3 (valence-arousal emotion, needs, mood-driven actions, time-of-day awareness, enriched character)
+- Wake from sleep: head pat + voice wake both working
 - Sound direction: disabled (fires on ambient noise, conflicts with servo thread)
 - All 30 ActionFlow actions available to LLM
 - Shutdown: Ctrl+C works (first=graceful, second=force quit)
@@ -75,4 +90,4 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - Safety: Asimov's Three Laws in LLM system prompt (kid-friendly)
 - Plans index: `~/pidog_lab/wiki/plans-index.md`
 - Personality v3: needs system (attention/stimulation/rest), emotion decay (exponential VA model), touch→mood, departure→sadness, stranger→shy, idle spontaneous behaviors, jealousy mechanic, enhanced sleep/wake rituals
-- Next: Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)
+- Spatial Memory: absolute angular tracking, distance estimation, occlusion persistence (10s Kalman coast), rich scene descriptions for LLM

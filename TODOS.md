@@ -36,8 +36,17 @@
 - [ ] I2S speaker/mic confirmed not working — add Bluetooth speaker
 - [ ] Enroll Alice's face and test first full interaction
 - [ ] Add Bluetooth speaker for audio from the dog itself
-- [ ] Secure CSI ribbon cable (keeps coming loose during head movement)
-- [ ] Implement Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)
+- [x] Reposition Pi board so CSI port faces head
+- [x] Tune head tracking smoothness (coast 15, sweep 8s, alpha 0.3, face lost 4s)
+- [x] Vision pipeline: YuNet-first detection, MOSSE inter-frame tracker, dead zone
+- [x] Smart arrivals: identity-aware GREET (Alice/family/known/stranger)
+- [x] Memory v2: semantic + episodic + combined extraction
+- [x] Shutdown voice command
+- [x] BT speaker auto-detect at startup
+- [x] API cost monitoring (session duration logging)
+- [ ] Get speaker (3.5mm or BT) and test audio from the dog
+- [ ] Enroll Alice's face and run first interaction test
+- [x] Implement Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)
 
 ## Future optimization (after baseline training succeeds)
 - [ ] Add VecNormalize if explained_variance stays below 0.4

@@ -37,7 +37,7 @@ _PULSE_DEV = _find_pulse_device()
 INPUT_DEVICE = _PULSE_DEV
 OUTPUT_DEVICE = _PULSE_DEV
 
-REALTIME_MODEL = "gpt-4o-realtime-preview"
+REALTIME_MODEL = "gpt-realtime"
 
 PERFORM_ACTION_TOOL = {
     "type": "function",
@@ -68,6 +68,16 @@ GO_TO_SLEEP_TOOL = {
     "type": "function",
     "name": "go_to_sleep",
     "description": "Call this when the user says goodnight, goodbye, or tells you to go to sleep. You will lie down and hibernate until woken up again.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    }
+}
+
+SHUTDOWN_TOOL = {
+    "type": "function",
+    "name": "shutdown",
+    "description": "Call this when the user says 'shutdown', 'power off', 'turn off', or 'shut down'. This fully stops the program. Say a quick goodbye first.",
     "parameters": {
         "type": "object",
         "properties": {},
@@ -116,6 +126,7 @@ class RealtimeVoice:
         self._on_speaking_start = None
         self._on_speaking_end = None
         self._on_sleep = None
+        self._on_shutdown = None
         self._on_who_is_here = None
         self._on_remember_face = None
 
@@ -150,6 +161,10 @@ class RealtimeVoice:
     def on_sleep(self, callback):
         """Register callback when model calls go_to_sleep (goodnight)."""
         self._on_sleep = callback
+
+    def on_shutdown(self, callback):
+        """Register callback when model calls shutdown (full stop)."""
+        self._on_shutdown = callback
 
     def on_who_is_here(self, callback):
         """Register callback for who_is_here tool: callback() -> str"""
@@ -243,7 +258,7 @@ class RealtimeVoice:
                         },
                     },
                     "tools": [PERFORM_ACTION_TOOL, GO_TO_SLEEP_TOOL,
-                              WHO_IS_HERE_TOOL, REMEMBER_FACE_TOOL],
+                              SHUTDOWN_TOOL, WHO_IS_HERE_TOOL, REMEMBER_FACE_TOOL],
                     "tool_choice": "auto",
                 }
             })
@@ -355,6 +370,18 @@ class RealtimeVoice:
                         })
                         if self._on_sleep:
                             self._on_sleep()
+
+                    elif func_name == "shutdown":
+                        print("Shutdown requested...")
+                        await conn.conversation.item.create(item={
+                            "type": "function_call_output",
+                            "call_id": event.call_id,
+                            "output": json.dumps({"status": "shutting_down"})
+                        })
+                        # Let the goodbye audio play
+                        await asyncio.sleep(3)
+                        if self._on_shutdown:
+                            self._on_shutdown()
 
                     elif func_name == "perform_action":
                         try:

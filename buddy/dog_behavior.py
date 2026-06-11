@@ -59,7 +59,7 @@ class DogBehavior:
                 "pant", "howling", "think", "surprise", "fluster",
                 "stand", "sit", "lie", "stretch", "push up", "scratch",
                 "handshake", "high five", "lick hand", "relax neck",
-                "head down", "recall",
+                "recall", "waiting", "twist body", "doze off", "feet shake",
             }
             blocked = [a for a in action_list if a not in safe_actions]
             action_list = [a for a in action_list if a in safe_actions]
@@ -86,6 +86,10 @@ class DogBehavior:
     def stand(self):
         """Stand up."""
         self.action_flow.change_poseture(Posetures.STAND)
+
+    def set_leds(self, mode, color, bps=1.0):
+        """Set LED pattern. Called by BehaviorEngine for ambient LEDs."""
+        self.dog.rgb_strip.set_mode(mode, color, bps=bps)
 
     def play_sound(self, name):
         """Play a dog sound effect."""

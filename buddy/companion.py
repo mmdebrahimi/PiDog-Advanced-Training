@@ -10,22 +10,22 @@ import argparse
 import os
 import signal
 import subprocess
-from time import sleep, time
+import time
+from time import sleep
 
 from . import config
 from .realtime_voice import RealtimeVoice
 from .dog_behavior import DogBehavior
 from .face_follower import FaceFollower
 from .room_awareness import RoomState
+from .spatial_memory import SpatialMemory
 from .memory_compiler import MemoryCompiler
 from .personality import PersonalityState
 from .social_graph import SocialGraph
+from .behavior_engine import BehaviorEngine
+from .semantic_memory import SemanticMemory
+from .episodic_memory import EpisodicMemory
 from . import memory
-
-try:
-    from pidog.dual_touch import TouchStyle
-except ImportError:
-    TouchStyle = None
 
 
 def run_companion(safe_mode=True, show_video=False):
@@ -37,11 +37,9 @@ def run_companion(safe_mode=True, show_video=False):
     dog = DogBehavior(safe_mode=safe_mode)
     print(f"Safe mode: {'ON' if safe_mode else 'OFF'}")
 
-    # --- Initialize face follower (social_graph linked after load) ---
-    tracker = None  # Created after social_graph is initialized
-
     # --- Initialize room awareness ---
     room = RoomState()
+    spatial = SpatialMemory()
 
     # --- Load names ---
     import json, os
@@ -53,13 +51,18 @@ def run_companion(safe_mode=True, show_video=False):
         config.CHILD_NAME = names.get("child_name", "Alice")
     print(f"Dog: {config.DOG_NAME}, Child: {config.CHILD_NAME}")
 
-    # --- Initialize personality + social graph + memory compiler ---
+    # --- Initialize personality + social graph + memory ---
     social_graph = SocialGraph()
     personality = PersonalityState()
-    compiler = MemoryCompiler(social_graph=social_graph, personality=personality)
+    semantic_mem = SemanticMemory()
+    episodic_mem = EpisodicMemory()
+    compiler = MemoryCompiler(social_graph=social_graph, personality=personality,
+                              semantic_memory=semantic_mem, episodic_memory=episodic_mem)
     personality.on_session_start()
     memory_text = memory.load_memory()
-    print(f"Personality: {personality.mood['current']} | People: {len(social_graph.people)}")
+    print(f"Personality: {personality.mood['current']} | People: {len(social_graph.people)} | "
+          f"Semantic facts: {sum(len(p.get('facts', [])) for p in semantic_mem.people.values())} | "
+          f"Episodes: {len(episodic_mem.sessions)}")
 
     # --- Create face follower with social graph linkage ---
     tracker = FaceFollower(dog_behavior=dog, show_video=show_video,
@@ -81,24 +84,21 @@ CRITICAL: You MUST call the perform_action tool on EVERY response. Do NOT write 
 Do NOT say things like *wag tail* or (performs action). Use the tool instead.
 
 When the user says "goodnight", "go to sleep", "bye bye", or "goodbye", say a sweet goodnight message
-and call the go_to_sleep tool. You will lie down and hibernate until woken up again."""
+and call the go_to_sleep tool. You will lie down and hibernate until woken up again.
 
-    def build_instructions(room_summary=""):
-        compiled_context = compiler.compile(room_summary)
-        return f"{BEHAVIOR_RULES}\n\n{compiled_context}"
+When the user says "shutdown", "power off", or "turn off", say a quick goodbye
+and call the shutdown tool. This fully stops the program."""
 
-    def build_instructions_update(room_summary=""):
-        """Lightweight update for mid-session room state changes."""
-        update_context = compiler.compile_update(room_summary)
-        return f"{BEHAVIOR_RULES}\n\n{update_context}" if update_context else None
-
-    instructions = build_instructions()
+    instructions = compiler.compile()
+    instructions = f"{BEHAVIOR_RULES}\n\n{instructions}"
 
     # --- Initialize voice ---
     voice = RealtimeVoice(api_key, instructions, voice="shimmer")
 
-    # --- State ---
-    sleeping = False
+    # --- Initialize behavior engine ---
+    engine = BehaviorEngine(dog, tracker, room, spatial, personality,
+                            voice, compiler, social_graph)
+    engine.set_behavior_rules(BEHAVIOR_RULES)
 
     # --- Wire callbacks ---
     def on_actions(actions):
@@ -109,79 +109,26 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
         dog.speaking()
 
     def on_speaking_end():
-        if not sleeping:
-            dog.idle()
-
-    def wake_up(source="unknown"):
-        nonlocal sleeping
-        if not sleeping:
-            return
-        sleeping = False
-        personality.on_session_start()
-        print(f"\n  Waking up! (source: {source})\n")
-        # Enhanced wake-up ritual: stretch → shake head → sit
-        dog.do_actions(["stretch"])
-        dog.wait_actions_done()
-        sleep(0.5)
-        dog.do_actions(["shake head"])
-        dog.wait_actions_done()
-        sleep(0.5)
-        dog.do_actions(["sit"])
-        dog.wait_actions_done()
-        dog.idle()
-        tracker.start()
-        sleep(1.5)
-        yaw, pitch = tracker.get_yaw_pitch()
-        room.update(tracker.get_tracked_people(), yaw, pitch)
-        greeted = room.get_greeting()
-        if greeted:
-            print(f"  Recognized: {greeted}!")
-            voice.update_instructions(
-                build_instructions(f"{greeted} just woke you up! Greet them by name.")
-            )
-        else:
-            voice.update_instructions(build_instructions("Someone just woke you up!"))
-
-    def on_sleep():
-        nonlocal sleeping
-        sleeping = True
-        tracker.stop()
-        personality.on_session_end(summary="goodnight")
-        print(f"\n  {config.DOG_NAME} is going to sleep...\n")
-        print(f"  Pat my head or say 'hi {config.DOG_NAME.lower()}' to wake up.\n")
-        sleep(3)  # Let the goodbye audio finish playing
-        # Enhanced goodnight ritual: stretch → doze off → lie → blue LEDs
-        dog.do_actions(["stretch"])
-        dog.wait_actions_done()
-        sleep(1)
-        dog.do_actions(["doze off"])
-        dog.wait_actions_done()
-        sleep(1)
-        dog.do_actions(["lie"])
-        dog.wait_actions_done()
-        dog.dog.rgb_strip.set_mode("breath", "blue", bps=0.3)  # Dim blue = sleeping
+        engine.restore_leds()
 
     def on_user_transcript(text):
-        nonlocal sleeping
-        if sleeping:
+        if engine.sleeping:
             text_lower = text.lower().strip(".,!?")
             dog_name_lower = config.DOG_NAME.lower()
-            # Broad wake word matching — any greeting + dog name variant
             greetings = ["hi", "hey", "hello", "wake up", "good morning"]
             name_variants = [dog_name_lower, dog_name_lower.replace("ou", "u"),
                            "buddy", "nunu", "nounou", "nono", "lulu"]
 
-            # Match: any greeting + any name variant anywhere in text
             has_greeting = any(g in text_lower for g in greetings)
             has_name = any(n in text_lower for n in name_variants)
 
             if has_greeting and has_name:
-                wake_up(source=f"voice: '{text}'")
+                engine.wake_up(source=f"voice: '{text}'")
             elif text_lower:
                 print(f"  [Sleeping, heard: '{text}' — say 'hi {config.DOG_NAME.lower()}' to wake]")
 
     def on_who_is_here():
-        return room.get_summary()
+        return spatial.get_scene_description()
 
     def on_remember_face(name):
         success = tracker.enroll_face(name)
@@ -190,20 +137,20 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             return f"Got it! I'll remember {name}'s face."
         return "I can't see a face right now. Look at me and try again."
 
-    # --- Wire touch sensor to personality ---
+    # --- Wire touch sensor to personality + sleep wake ---
     def on_touch_event(style):
+        if engine.sleeping and style == "gentle":
+            engine.wake_up(source="head pat")
+            return
         result = personality.on_touch(style)
-        print(f"  Touch ({style}) → mood: {result}")
-        update = build_instructions_update(room.get_summary())
-        if update:
-            voice.update_instructions(update)
+        print(f"  Touch ({style}) -> mood: {result}")
 
     dog.on_touch(on_touch_event)
 
     voice.on_actions(on_actions)
     voice.on_speaking_start(on_speaking_start)
     voice.on_speaking_end(on_speaking_end)
-    voice.on_sleep(on_sleep)
+    voice.on_sleep(engine.go_to_sleep)
     voice.on_user_transcript(on_user_transcript)
     voice.on_who_is_here(on_who_is_here)
     voice.on_remember_face(on_remember_face)
@@ -226,24 +173,57 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             voice.stop()
         except Exception:
             pass
-        # Save memory + social graph + personality
+        # Save memory v2 (single combined API call)
         print("Saving memories...")
         transcripts = voice.get_transcripts()
+        session_dur = (time.time() - session_start_time) / 60
         try:
-            memory.update_memory(api_key, transcripts, memory_text)
+            memory.update_all_memory(
+                api_key, transcripts, semantic_mem, episodic_mem,
+                social_graph, session_duration_min=session_dur
+            )
         except Exception as e:
-            print(f"Memory save error: {e}")
-        try:
-            memory.update_social_graph(api_key, transcripts, social_graph)
-        except Exception as e:
-            print(f"Social graph update error: {e}")
+            print(f"Memory v2 save error: {e}")
+            # Fallback to legacy memory save
+            try:
+                memory.update_memory(api_key, transcripts, memory_text)
+                memory.update_social_graph(api_key, transcripts, social_graph)
+            except Exception as e2:
+                print(f"Legacy memory fallback error: {e2}")
         try:
             personality.on_session_end()
             print("Personality state saved.")
         except Exception as e:
             print(f"Personality save error: {e}")
         try:
+            spatial.save()
+            print("Spatial memory saved.")
+        except Exception as e:
+            print(f"Spatial memory save error: {e}")
+        try:
             dog.close()
+        except Exception:
+            pass
+        # Log session duration for API cost awareness
+        try:
+            import json as _json
+            duration_min = (time.time() - session_start_time) / 60
+            usage_file = os.path.expanduser("~/.config/pidog/usage.json")
+            usage = []
+            if os.path.exists(usage_file):
+                with open(usage_file) as f:
+                    usage = _json.load(f)
+            from datetime import datetime
+            usage.append({
+                "date": datetime.now().isoformat(),
+                "duration_minutes": round(duration_min, 1),
+            })
+            os.makedirs(os.path.dirname(usage_file), exist_ok=True)
+            with open(usage_file, "w") as f:
+                _json.dump(usage, f, indent=2)
+            print(f"Session: {duration_min:.1f} minutes logged.")
+            if duration_min > 60:
+                print(f"  Warning: session exceeded 60 min — check API costs")
         except Exception:
             pass
         print("Goodbye!")
@@ -251,6 +231,25 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    voice.on_shutdown(lambda: signal_handler(None, None))
+
+    # --- Auto-detect Bluetooth speaker, fall back to HDMI ---
+    try:
+        r = subprocess.run(['pactl', 'list', 'sinks', 'short'],
+                          capture_output=True, text=True, timeout=5)
+        bt_sink = None
+        for line in r.stdout.strip().splitlines():
+            if 'bluez' in line.lower() or 'bluetooth' in line.lower():
+                bt_sink = line.split('\t')[1]
+                break
+        if bt_sink:
+            subprocess.run(['pactl', 'set-default-sink', bt_sink],
+                          capture_output=True, timeout=5)
+            print(f"Audio: Bluetooth speaker ({bt_sink})")
+        else:
+            print("Audio: HDMI (no Bluetooth speaker detected)")
+    except Exception:
+        print("Audio: default sink (pactl unavailable)")
 
     # --- Set volume with ramp (child-safe cap at 80%) ---
     try:
@@ -261,6 +260,9 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
         print("Volume: 80% (child-safe cap)")
     except Exception:
         pass
+
+    # --- Session timer (for API cost tracking) ---
+    session_start_time = time.time()
 
     # --- Startup ---
     print(f"\nStarting {config.DOG_NAME}...")
@@ -277,26 +279,7 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
           f"  Say 'hi {config.DOG_NAME.lower()}' to wake up.\n"
           f"  Press Ctrl+C to quit.\n")
 
-    # --- Main loop: update room awareness ---
-    last_room_summary = ""
-    last_instruction_time = 0
-    last_who_printed = []
-    last_room_update = 0
-    last_personality_tick = 0
-    last_jealousy_time = 0
-    INSTRUCTION_INTERVAL = 10.0  # Min seconds between LLM instruction updates
-    ROOM_UPDATE_INTERVAL = 2.0
-    PERSONALITY_TICK_INTERVAL = 10.0
-
-    # Map personality suggestions to existing ActionFlow actions
-    _SPONTANEOUS_ACTION_MAP = {
-        "whimper": "howling",
-        "yawn": "doze off",
-        "paw": "feet shake",
-        "confused_look": "think",
-        "head_tilt": "think",
-    }
-
+    # --- Main loop ---
     try:
         while True:
             # Pump video window if enabled (needs ~30Hz for responsive display)
@@ -307,91 +290,8 @@ and call the go_to_sleep tool. You will lie down and hibernate until woken up ag
             else:
                 sleep(0.5)
 
-            now = time()
-
-            # During sleep: poll touch sensor for head pat wake
-            if sleeping:
-                if TouchStyle is not None:
-                    try:
-                        touch = dog.dog.dual_touch.read()
-                        if touch == TouchStyle.FRONT_TO_REAR:
-                            wake_up(source="head pat")
-                    except Exception:
-                        pass
-                continue
-
-            if now - last_room_update < ROOM_UPDATE_INTERVAL:
-                continue
-            last_room_update = now
-
-            if not sleeping:
-                yaw, pitch = tracker.get_yaw_pitch()
-                room.update(tracker.get_tracked_people(), yaw, pitch)
-                who = room.who_is_here()
-
-                # Compute arrivals/departures BEFORE updating last_who_printed
-                new_arrivals = set(who) - set(last_who_printed)
-                departed = set(last_who_printed) - set(who)
-
-                # Print room changes
-                if sorted(who) != sorted(last_who_printed):
-                    if who:
-                        print(f"  Room: {', '.join(who)}")
-                    else:
-                        print("  Room: empty")
-                    last_who_printed = list(who)
-
-                # Fire personality hooks for arrivals
-                for name in new_arrivals:
-                    person = social_graph.get_person(name)
-                    role = person.get("role", "") if person else ""
-                    personality.on_person_seen(name, role)
-
-                # Fire personality hooks for departures
-                for name in departed:
-                    person = social_graph.get_person(name)
-                    role = person.get("role", "") if person else ""
-                    result = personality.on_person_departed(name, role)
-                    print(f"  {name} left → mood: {result}")
-
-                # Stranger detection
-                summary = room.get_summary()
-                if "unknown person" in summary.lower():
-                    personality.on_stranger_seen()
-
-                # Rate-limit LLM instruction updates
-                now = time()
-                if (summary != last_room_summary
-                        and now - last_instruction_time >= INSTRUCTION_INTERVAL):
-                    last_room_summary = summary
-                    last_instruction_time = now
-                    update = build_instructions_update(summary)
-                    if update:
-                        voice.update_instructions(update)
-
-                # Personality idle tick + spontaneous behaviors
-                if now - last_personality_tick >= PERSONALITY_TICK_INTERVAL:
-                    last_personality_tick = now
-                    suggestions = personality.on_idle_tick()
-                    if suggestions:
-                        action = _SPONTANEOUS_ACTION_MAP.get(
-                            suggestions[0], suggestions[0])
-                        print(f"  Spontaneous: {suggestions[0]} → {action}")
-                        dog.do_actions([action])
-
-                    # Jealousy check
-                    owner_here = config.CHILD_NAME in who
-                    others = [n for n in who if n != config.CHILD_NAME]
-                    jealousy, context = personality.on_jealousy_check(
-                        owner_here, others, last_jealousy_time)
-                    if jealousy:
-                        last_jealousy_time = now
-                        print(f"  Jealous! (subtle)")
-                        dog.do_actions(["howling"])
-                        jealousy_update = build_instructions_update(
-                            summary + " " + context)
-                        if jealousy_update:
-                            voice.update_instructions(jealousy_update)
+            # Engine handles all behavior logic
+            engine.tick()
 
     except KeyboardInterrupt:
         signal_handler(None, None)

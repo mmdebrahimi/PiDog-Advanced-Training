@@ -32,9 +32,9 @@ After basic forward walking works, add curriculum: flat → slight slope → rou
 
 ## Nice to Have
 
-### Bluetooth Speaker Auto-Detection
+### Bluetooth Speaker
 Date: 05/04/2026
-When a Bluetooth speaker is paired to the Pi, auto-detect it as the audio output device. Fall back to HDMI if no BT device found. Enables audio from the dog itself for Alice's first interaction.
+Connect BT speaker so the dog has its own voice. Auto-detect as PulseAudio default sink, fall back to HDMI. Critical for Alice's first test — she needs to hear Nounou speak from the dog itself.
 
 ### Multi-Person Conversation Awareness
 Date: 05/04/2026
@@ -42,19 +42,47 @@ When multiple people are in the room (tracked by SORT + face ID), the dog could 
 
 ### Voice Companion V2 — Emotional State
 Date: 04/04/2026
-**Partially implemented (2026-04-05):** `personality.py` now has mood that evolves between sessions (excitement scales with absence). Traits are fixed. Quirks injected into LLM context. Remaining: mood affecting action choices (needs Behavior Engine), speech tone changes (Realtime API voice is fixed per session).
+**Implemented (2026-06-10):** Personality v3 with valence-arousal emotion, needs system, event hooks, care rituals, spontaneous behaviors. Mood-driven action selection via behavior engine (mood actions: wag tail if happy, howl if sad, etc.). Time-of-day awareness. Remaining: mood affecting speech tone (Realtime API voice is fixed per session).
 
 ### Behavior Engine
 Date: 05/04/2026
-Priority-based state machine that centralizes Nounou's decision-making. Evaluates inputs (room state, tracking, voice, touch, time of day) every 500ms and picks the highest-priority active behavior: GREET, TRACK, SEARCH, REST, SLEEP. Controls head target, body actions, LED patterns, and voice context. Plan at `plans/Behavior_Engine_Plan.md`.
+**Implemented (2026-04-11):** Priority-based state machine in `buddy/behavior_engine.py`. 5 behaviors: SLEEP > GREET > TRACK > SEARCH > REST. Engine coordinates FaceFollower mode, LED patterns, personality hooks, and LLM context injection. Companion.py main loop reduced from ~100 lines to ~10 lines.
+
+### Proactive Conversation Initiation
+Date: 06/04/2026
+Dog speaks first instead of only responding. Triggers: face detection without recent interaction ("Alice! I was thinking about you!"), time-based ("It's been two days!"), context callbacks ("Did you finish that drawing?"). Short, optional, never pushy. Research shows this is key for sustained engagement.
+
+### Daily Ritual Slots
+Date: 06/04/2026
+Morning greeting, after-school check-in, bedtime wind-down ("What was the best part of today?"). Research shows engagement drops after week 2 unless robot embeds into daily routines. Use time-of-day triggers via cron or companion loop.
+
+### Emotional Sound Layer
+Date: 06/04/2026
+Pre-recorded .wav files triggered by emotion state: contented sigh when petted, excited yip before speech, sleepy grumble when tired. Non-verbal sounds trigger stronger emotional responses than words. Zero compute cost — file playback alongside voice.
+
+### Mini-Games
+Date: 06/04/2026
+Simon Says (dog does action, Alice copies), Teaching Tricks (pretend learning over 3 attempts), 20 Questions, Story Time (take turns). All achievable with existing 30 ActionFlow actions + voice.
+
+### Multi-Class Object Detection
+Date: 06/04/2026
+Use existing `efficientdet_lite0.tflite` in vilib/workspace/ to detect chairs, cups, toys. Run every 5th frame (~9 FPS). Store in spatial memory. Plan at `plans/Spatial_Memory_Plan.md` Phase 4.
+
+### Personality Drift Over Time
+Date: 06/04/2026
+Track interaction types in a JSON counter (petting frequency, game types, conversation topics). Over weeks, shift personality weights — if Alice reads to Nounou, develop a "bookworm" quirk. The dog becomes uniquely hers.
 
 ### Episodic Memory (v2)
 Date: 05/04/2026
-Per-session episode summaries stored in `~/.config/pidog/episodic_memory/YYYY-MM-DD.json`. Enables "remember when..." conversations. Requires forgetting/compression for old episodes. Current flat memory + social graph is v1; this is the v2 upgrade.
+**Implemented (2026-06-10):** Three-layer memory: Soul (immutable personality), Semantic (per-person facts with dedup, milestones, topic counters in `semantic_memory.py`), Episodic (rolling 10 session summaries with emotional tone and key moments in `episodic_memory.py`). Combined single API call extraction at shutdown. Context injection includes "Last time you talked to Alice..." preamble.
+
+### Battery-as-Hunger
+Date: 06/04/2026
+Map Pi voltage to personality hunger state. Low battery = "tummy rumbling", charging = "eating". Tamagotchi-style care mechanic that drives bonding through dependency.
 
 ### Adaptive Volume
 Date: 05/04/2026
-Measure ambient noise level via mic and adjust PulseAudio output volume dynamically. Louder in noisy rooms, quieter at night. Currently set to 100% at startup which is the simple fix.
+Measure ambient noise level via mic and adjust PulseAudio output volume dynamically. Louder in noisy rooms, quieter at night. Currently ramped to 80% at startup (child-safe cap).
 
 ### Local Wake Word for Sleep State
 Date: 05/04/2026

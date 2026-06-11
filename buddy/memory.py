@@ -209,6 +209,139 @@ Rules:
         print(f"Social graph updated: +{new_count} people, {update_count} updates")
 
 
+def update_all_memory(api_key, messages, semantic_memory, episodic_memory,
+                      social_graph, session_duration_min=0.0, people_present=None):
+    """Combined memory extraction — single API call for all memory layers.
+
+    Extracts: per-person facts (→ semantic), session summary (→ episodic),
+    people updates (→ social graph), topics (→ semantic counters).
+    """
+    user_messages = [m for m in messages if m["role"] == "user"
+                     and not m["content"].startswith("<<<")]
+    if len(user_messages) < 2:
+        print("Session too short for memory extraction.")
+        return
+
+    people_present = people_present or [config.CHILD_NAME]
+
+    transcript = ""
+    for m in messages:
+        if m["role"] == "system":
+            continue
+        role = "Dog" if m["role"] == "assistant" else "Human"
+        transcript += f"{role}: {m['content']}\n"
+
+    # Existing facts for dedup context
+    existing_facts = {}
+    for person in people_present:
+        facts = semantic_memory.get_facts(person, limit=20)
+        if facts:
+            existing_facts[person] = [f["fact"] for f in facts]
+
+    known_people = list(social_graph.people.keys())
+
+    prompt = f"""You are analyzing a conversation between a robot dog named {config.DOG_NAME} and people.
+People present: {', '.join(people_present)}
+Known people: {', '.join(known_people) if known_people else 'none yet'}
+
+Existing facts (do NOT repeat these):
+{json.dumps(existing_facts, indent=2) if existing_facts else '(none yet)'}
+
+Conversation:
+{transcript}
+
+Output ONLY valid JSON (no markdown):
+{{
+  "session_summary": "2-3 sentence summary of what happened",
+  "emotional_tone": "happy, excited",
+  "key_moments": ["Alice laughed when...", "Alice asked about..."],
+  "new_facts": {{
+    "{config.CHILD_NAME}": ["Alice wants to be a zookeeper"],
+    "OtherPerson": ["fact about them"]
+  }},
+  "topics": ["animals", "school"],
+  "new_people": [
+    {{"name": "Sara", "role": "friend", "notes": ["school friend"], "relationship_to_{config.CHILD_NAME}": "friend"}}
+  ],
+  "updates": {{
+    "{config.CHILD_NAME}": {{
+      "interests_add": ["penguins"],
+      "notes_add": ["went to the zoo"]
+    }}
+  }}
+}}
+
+Rules:
+- new_facts: ONLY facts NOT in the existing facts list
+- session_summary: what the conversation was about, 2-3 sentences
+- topics: main subjects discussed (1-3 words each)
+- If nothing new, empty lists/objects
+- Output ONLY the JSON"""
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            temperature=0.2,
+        )
+        result_text = response.choices[0].message.content.strip()
+
+        if result_text.startswith("```"):
+            result_text = result_text.split("```")[1]
+            if result_text.startswith("json"):
+                result_text = result_text[4:]
+
+        result = json.loads(result_text)
+    except Exception as e:
+        print(f"Memory extraction error: {e}")
+        return
+
+    # --- Apply to semantic memory ---
+    fact_count = 0
+    for person, facts in result.get("new_facts", {}).items():
+        for fact in facts:
+            if semantic_memory.add_fact(person, fact):
+                fact_count += 1
+
+    for topic in result.get("topics", []):
+        for person in people_present:
+            semantic_memory.increment_topic(person, topic)
+
+    # --- Apply to episodic memory ---
+    episodic_memory.add_session({
+        "duration_minutes": round(session_duration_min, 1),
+        "people_present": people_present,
+        "summary": result.get("session_summary", ""),
+        "emotional_tone": result.get("emotional_tone", ""),
+        "key_moments": result.get("key_moments", []),
+        "new_facts_learned": [f for facts in result.get("new_facts", {}).values() for f in facts],
+    })
+
+    # --- Apply to social graph ---
+    new_people_count = 0
+    for person in result.get("new_people", []):
+        name = person.get("name", "").strip()
+        if not name:
+            continue
+        social_graph.add_person(name, role=person.get("role", ""),
+                               notes=person.get("notes", []))
+        rel_key = f"relationship_to_{config.CHILD_NAME}"
+        if rel_key in person and person[rel_key]:
+            social_graph.add_relationship(config.CHILD_NAME, name, person[rel_key])
+        new_people_count += 1
+
+    for name, updates in result.get("updates", {}).items():
+        if social_graph.get_person(name):
+            social_graph.update_person(name, **updates)
+
+    print(f"Memory v2: +{fact_count} facts, "
+          f"+{new_people_count} people, "
+          f"session logged, "
+          f"topics: {result.get('topics', [])}")
+
+
 def inject_into_prompt(system_prompt, memory_text):
     """Append memory to system prompt so the dog 'remembers'."""
     if not memory_text:

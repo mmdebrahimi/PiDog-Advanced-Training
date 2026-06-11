@@ -15,7 +15,7 @@ class ServoSmoother:
     Adaptive alpha: higher during initial lock-on, lower during stable tracking.
     """
 
-    ALPHA_LOCKON = 0.6    # Fast response for first 0.5s
+    ALPHA_LOCKON = 0.3    # Smooth glide toward re-acquired target
     ALPHA_TRACKING = 0.3  # Normal tracking
     ALPHA_SWEEP = 0.15    # Very smooth for idle sweep
 

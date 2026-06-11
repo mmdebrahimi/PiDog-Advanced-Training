@@ -27,7 +27,9 @@ pidog_training.zip
 system_info.txt
 
 # Sensitive
+.env
 openai_key
+anthropic_key
 secret.py
 
 # Large files

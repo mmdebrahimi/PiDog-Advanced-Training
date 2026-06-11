@@ -78,11 +78,13 @@
 
 ---
 
-## [plan_file: Behavior_Engine_Plan.md] 2026-04-05
-**Summary:** Centralize Nounou's decision-making into a priority-based behavior engine that orchestrates head tracking, actions, LEDs, and voice context.
+## [plan_file: Behavior_Engine_Plan.md] 2026-04-11
+**Summary:** Centralize Nounou's decision-making into a priority-based behavior engine that replaces scattered inline logic in companion.py's main loop.
 **Key decisions:**
 - Priority-based state machine, not LLM orchestrator (instant, deterministic)
-- Behaviors as skill sequences, not agent frameworks
+- Engine sets mode, FaceFollower obeys — no dual servo control
+- LED ownership contract: engine owns ambient, voice owns transient
+- RESPOND removed from priority list (voice is callback-driven)
 - Start with 5 behaviors: GREET, TRACK, SEARCH, REST, SLEEP
 
 ---
@@ -125,5 +127,55 @@
 - Concrete testable constraints over abstract "do no harm" logic
 - "Through inaction" is not implementable — don't pretend the dog can protect Alice
 - Self-preservation subordinate to bonding design (vulnerability > self-defense)
+
+---
+
+## [plan_file: Spatial_Memory_Plan.md] 2026-04-06
+**Summary:** Add spatial memory, object permanence, and rich scene descriptions to give Nounou a mental map of its environment.
+**Key decisions:**
+- Absolute angular position tracking using servo angles + pixel-to-angle conversion
+- Occlusion persistence via extended Kalman coasting (max_age 15→100) + room_awareness freeze
+- New spatial_memory.py module (separate from room_awareness — single responsibility)
+- Multi-class object detection as stretch goal using existing efficientdet_lite0.tflite
+
+---
+
+## [plan_file: Head_Tracking_Smoothing_Plan.md] 2026-04-12
+**Summary:** Reduce unnecessary head movement when tracking Alice by tuning coast, sweep, and servo smoothing parameters.
+**Key decisions:**
+- Increase coast from 5 to 15 frames (0.5s → 1.5s Kalman prediction)
+- Increase sweep timeout from 3s to 8s (don't give up on Alice too quickly)
+- Reduce lock-on alpha from 0.6 to 0.3 (smooth re-acquisition instead of snap)
+- Increase face lost timeout from 2s to 4s
+
+---
+
+## [plan_file: Vision_Pipeline_Upgrade_Plan.md] 2026-04-13
+**Summary:** Improve face tracking smoothness by switching to YuNet, adding MOSSE inter-frame tracking, and tuning servo parameters.
+**Key decisions:**
+- Switch Haar to YuNet for face detection (model already on disk, better at side/tilted faces)
+- Add MOSSE inter-frame tracker for smooth 30 Hz servo updates between 10 FPS detections
+- Keep person detection as fallback for when Alice's face isn't visible
+- Add dead zone to eliminate micro-jitter when Alice is centered
+
+---
+
+## [plan_file: Alice_Launch_Roadmap.md] 2026-06-10
+**Summary:** Session-by-session action map to get Nounou ready for Alice's first interaction, then deepen the companion based on her feedback.
+**Key decisions:**
+- 5 discrete sessions: hardware prep → BT audio + enrollment → first encounter prep → live test → deepen based on feedback
+- "Her reaction IS the roadmap" — Session 5+ features are driven by Alice's actual responses
+- RL training runs as a parallel track on the laptop, independent of companion sessions
+- Scripted first encounter to maximize chance of positive first impression
+
+---
+
+## [plan_file: Nounou_Big_Picture_Plan.md] 2026-06-10
+**Summary:** Complete roadmap from stationary companion to autonomous memory-rich robot dog — 8 families, ~13 sessions.
+**Key decisions:**
+- Three-layer memory: Soul (immutable) + Semantic (per-person facts) + Episodic (session summaries)
+- Topological mapping (visual place recognition) before metric SLAM
+- Dead reckoning for home-return (no SLAM needed for v1)
+- Families 2, 3, 4 can run in parallel; 5-7 are sequential
 
 ---

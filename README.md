@@ -71,19 +71,23 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
   first_gait.py       # Manual diagonal trot gait
   buddy/              # Voice companion ("Nounou") + person tracking
     companion.py      # Full companion entry point (python3 -m buddy.companion [--video])
+    behavior_engine.py # Priority-based behavior state machine (GREET/TRACK/SEARCH/REST/SLEEP)
     realtime_voice.py # OpenAI Realtime API WebSocket voice session
     config.py         # Names, prompts, thresholds
-    dog_behavior.py   # Pidog + ActionFlow wrapper (safe mode)
+    dog_behavior.py   # Pidog + ActionFlow wrapper (safe mode, LEDs)
     face_follower.py  # Person tracking orchestrator (detection + servo threads)
     servo_controller.py # Proportional + EMA servo control
-    detectors.py      # PersonDetector (TFLite), FaceDetector (Haar), HeadEstimator
+    detectors.py      # PersonDetector (TFLite), YuNetDetector (DNN), HeadEstimator
     tracker.py        # SORT tracker (Kalman + Hungarian assignment)
     face_id.py        # Face recognition (SFace embeddings + JSON database)
-    room_awareness.py # Who's here, where last seen, LLM context
+    room_awareness.py # Who's here, where last seen, absolute angular positions
+    spatial_memory.py # Mental map: angular tracking, distance, velocity, scene descriptions
     social_graph.py   # People database (roles, relationships, interests)
     personality.py    # Personality v3: valence-arousal emotion, needs system, event hooks (persistent)
+    semantic_memory.py # Per-person fact storage with dedup, milestones, topic counters
+    episodic_memory.py # Rolling session summaries per person (last 10 sessions)
     memory_compiler.py # Compiles all memory sources into LLM context
-    memory.py         # Long-term memory + social graph session-end updates
+    memory.py         # Memory extraction at shutdown (combined single API call)
     models/           # ONNX models (SFace, YuNet — gitignored, auto-downloaded)
     main.py           # Legacy 3-call pipeline entry point
   wiki/               # Plans index, decisions log
@@ -132,7 +136,11 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
 | 8 | MuJoCo Simulation | Done (model + scripted gait works) |
 | 9 | RL Training | **In progress** (pipeline works, training on laptop) |
 | - | Voice Companion | **Working** (buddy/ — Realtime API + function calling + long-term memory) |
-| - | Person Tracking | **Working** (TFLite person + Haar face + SORT tracker + SFace face ID) |
+| - | Person Tracking | **Working** (YuNet face + TFLite person fallback + MOSSE + SORT + SFace face ID) |
 | - | Room Awareness | **Working** (who's here → LLM context, voice commands: "who can you see?") |
 | - | Personality v3 | **Working** (valence-arousal emotion, needs system, touch/departure/stranger hooks, care rituals) |
 | - | Safety Laws | **Working** (Three Laws in LLM prompt, volume cap at 80%) |
+| - | Spatial Memory | **Working** (absolute angular tracking, distance bins, occlusion persistence, scene descriptions) |
+| - | Behavior Engine | **Working** (priority state machine: GREET/TRACK/SEARCH/REST/SLEEP, LED ownership, FaceFollower mode control) |
+| - | Smart Arrivals | **Working** (identity-aware GREET: Alice=excited, family=warm, known=friendly, stranger=curious) |
+| - | Memory v2 | **Working** (semantic per-person facts + episodic session summaries + combined extraction) |

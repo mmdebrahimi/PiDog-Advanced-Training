@@ -3,7 +3,7 @@
 
 Two-stage detection pipeline:
   1. PersonDetector (TFLite SSD) finds people in frame
-  2. FaceDetector (Haar cascade) finds faces within person ROIs
+  2. YuNetDetector (OpenCV DNN) finds faces within person ROIs
   3. HeadEstimator infers head position when face not visible
 
 Falls back to Haar-only if TFLite is unavailable.
@@ -26,7 +26,7 @@ from .face_id import FaceIDWorker
 
 # Try to import TFLite-based detectors; fall back to Haar-only
 try:
-    from .detectors import PersonDetector, FaceDetector, HeadEstimator
+    from .detectors import PersonDetector, YuNetDetector, HeadEstimator
     _TFLITE_AVAILABLE = True
 except (ImportError, RuntimeError) as e:
     _TFLITE_AVAILABLE = False
@@ -55,8 +55,8 @@ class FaceFollower:
 
     # Timing
     LOOP_HZ = 20
-    FACE_LOST_TIMEOUT = 2.0
-    TRACK_COAST_FRAMES = 5  # Keep tracking via Kalman prediction when detection drops
+    FACE_LOST_TIMEOUT = 4.0
+    TRACK_COAST_FRAMES = 15  # Keep tracking via Kalman prediction when detection drops
 
     # Sound direction
     DEFAULT_PITCH = 30  # Look up toward humans by default (max pitch)
@@ -67,7 +67,7 @@ class FaceFollower:
     # Sweep fallback (narrower than yaw limits to stay safe)
     SWEEP_MIN, SWEEP_MAX = -45, 45
     SWEEP_SPEED = 10  # degrees per second
-    SWEEP_TIMEOUT = 3.0  # seconds with no face/sound before sweeping
+    SWEEP_TIMEOUT = 8.0  # seconds with no face/sound before sweeping
 
     def __init__(self, dog_behavior=None, show_video=True, detector='auto',
                  log=False, social_graph=None):
@@ -126,6 +126,15 @@ class FaceFollower:
         self._servo_source = 'face'  # 'face' or 'body' — body gets upward pitch bias
         self._last_track_id = None
 
+        # Behavior mode (set by BehaviorEngine, read by detection/servo threads)
+        # 'track' = normal, 'sweep' = force sweep, 'idle' = hold position, 'off' = stop servos
+        self._behavior_mode = 'track'
+
+        # MOSSE inter-frame tracker (fills gaps between detection frames)
+        self._mosse = None  # cv2.legacy.TrackerMOSSE instance
+        self._mosse_bbox = None  # last bbox used to init MOSSE
+        self._mosse_lock = threading.Lock()
+
         # Camera + detectors
         self._camera = None
         self._latest_frame = None
@@ -136,9 +145,9 @@ class FaceFollower:
                       (detector == 'auto' and _TFLITE_AVAILABLE))
         if use_tflite and _TFLITE_AVAILABLE:
             self._person_detector = PersonDetector()
-            self._face_detector = FaceDetector()
+            self._face_detector = YuNetDetector()
             self._use_tflite = True
-            print("Detection: TFLite person + Haar face (two-stage)")
+            print("Detection: TFLite person + YuNet face (two-stage)")
         else:
             self._person_detector = None
             self._face_detector = None
@@ -156,7 +165,7 @@ class FaceFollower:
                 raise RuntimeError("Haar cascade model not found.")
 
         # SORT tracker for persistent person IDs
-        self._tracker = SORTTracker(max_age=15, min_hits=1, iou_threshold=0.3)
+        self._tracker = SORTTracker(max_age=100, min_hits=1, iou_threshold=0.3)
         self._primary_track_id = None  # Track ID of the person we're following
 
         # Face ID (async background thread)
@@ -169,16 +178,37 @@ class FaceFollower:
             return
 
         if self._camera is None:
-            print("Starting camera...")
-            self._camera = Picamera2(0)
-            cam_config = self._camera.create_preview_configuration(
-                main={"size": (FRAME_W, FRAME_H), "format": "RGB888"}
-            )
-            self._camera.configure(cam_config)
-            self._camera.start()
-            # Let auto white balance and exposure settle
-            sleep(1.0)
-            print("Camera started.")
+            try:
+                print("Starting camera...")
+                self._camera = Picamera2(0)
+                cam_config = self._camera.create_preview_configuration(
+                    main={"size": (FRAME_W, FRAME_H), "format": "RGB888"}
+                )
+                self._camera.configure(cam_config)
+                self._camera.start()
+                # Test that frames actually stream (catches loose CSI cable)
+                # capture_array() can hang if data path is broken, so use timeout
+                result = [None]
+                def _test_capture():
+                    try:
+                        result[0] = self._camera.capture_array()
+                    except Exception:
+                        pass
+                t = threading.Thread(target=_test_capture, daemon=True)
+                t.start()
+                t.join(timeout=5.0)
+                if result[0] is None:
+                    raise RuntimeError("Camera capture timed out (CSI cable?)")
+                sleep(1.0)
+                print("Camera started.")
+            except Exception as e:
+                import sys
+                print(f"  [Camera failed: {e}] — running without tracking")
+                sys.stdout.flush()
+                # Don't try camera.close() — it can hang on broken CSI
+                self._camera = None
+                self._camera_failed = True
+                return
 
         self._running = True
         self._detect_thread = threading.Thread(target=self._detection_loop, daemon=True)
@@ -207,9 +237,21 @@ class FaceFollower:
             self._camera.stop()
             self._camera.close()
             self._camera = None
+
         if self._log_file:
             self._log_file.close()
             print(f"Log saved: {self._log_path}")
+
+    def set_behavior_mode(self, mode):
+        """Set high-level behavior mode (called by BehaviorEngine).
+
+        Modes:
+          'track' — normal: track faces, sweep when lost (default)
+          'idle'  — detect but don't sweep when face lost, hold position
+          'off'   — stop servos entirely (sleep mode), detection still runs
+        """
+        with self._servo_lock:
+            self._behavior_mode = mode
 
     def _init_log(self):
         log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -259,16 +301,23 @@ class FaceFollower:
     def _update_shared_state(self, tracks=None):
         """Copy current tracking state to shared snapshot (thread-safe)."""
         people = []
+        coasting = []
         if tracks:
-            people = [{"id": t.id, "name": t.name, "bbox": t.bbox,
-                       "has_face": t.face_bbox is not None}
-                      for t in tracks if t.time_since_update == 0]
+            for t in tracks:
+                entry = {"id": t.id, "name": t.name, "bbox": t.bbox,
+                         "has_face": t.face_bbox is not None}
+                if t.time_since_update == 0:
+                    people.append(entry)
+                elif t.time_since_update <= 30 and t.name:
+                    # Coasting: named tracks still predicted by Kalman (up to 3s)
+                    coasting.append(entry)
         with self._state_lock:
             self._shared_state = {
                 "yaw": self.yaw, "pitch": self.pitch,
                 "tracking": self._tracking,
                 "face_info": self._face_info.copy(),
                 "tracked_people": people,
+                "coasting_tracks": coasting,
             }
 
     def is_tracking(self):
@@ -283,6 +332,11 @@ class FaceFollower:
         """Get list of tracked people with IDs and names (thread-safe)."""
         with self._state_lock:
             return list(self._shared_state["tracked_people"])
+
+    def get_coasting_tracks(self):
+        """Get named tracks still predicted by Kalman but not actively detected."""
+        with self._state_lock:
+            return list(self._shared_state.get("coasting_tracks", []))
 
     def get_yaw_pitch(self):
         """Get current servo angles (thread-safe)."""
@@ -345,49 +399,58 @@ class FaceFollower:
             return self._detect_tflite(frame)
         return self._detect_haar(frame)
 
-    def _detect_tflite(self, frame):
-        """Two-stage: PersonDetector → FaceDetector on each person ROI → HeadEstimator.
+    # How long without a face before falling back to TFLite person detection
+    FACE_FALLBACK_TIMEOUT = 2.0
 
-        Face detection (Haar) only runs every 3rd frame to improve FPS.
-        Person detection + head estimation runs every frame.
+    def _detect_tflite(self, frame):
+        """YuNet-first detection: run face detection on full frame first.
+
+        Only falls back to TFLite person detection + HeadEstimator when
+        no face has been seen for FACE_FALLBACK_TIMEOUT seconds. This
+        skips the expensive TFLite step (~100ms) when Alice's face is
+        visible, giving ~2.5x more detection cycles.
         """
-        persons = self._person_detector.detect(frame)
-        all_faces = []
+        now = time()
+        face_recently_seen = (now - self._last_face_time) < self.FACE_FALLBACK_TIMEOUT
+
+        # --- Phase 1: YuNet on full frame (fast, ~25 FPS) ---
+        all_faces = self._face_detector.detect(frame)
         target = None
 
-        # Run face detection less often (it's slow on top of TFLite)
-        self._tflite_frame_count = getattr(self, '_tflite_frame_count', 0) + 1
-        run_face = (self._tflite_frame_count % 3 == 0)
+        if all_faces:
+            largest = max(all_faces, key=lambda f: f[2] * f[3])
+            fx, fy, fw, fh = largest
+            cx, cy = fx + fw // 2, fy + fh // 2
+            target = (cx, cy, fw, 'face')
+            # Skip TFLite entirely — face found
+            return target, all_faces, []
 
-        for person in persons:
-            px, py, pw, ph = person[:4]
-            roi = (px, py, pw, ph)
-            faces = self._face_detector.detect(frame, roi=roi) if run_face else []
-            all_faces.extend(faces)
+        # --- Phase 2: TFLite person detection (slow, ~10 FPS) ---
+        # Only run when no face has been seen recently
+        if not face_recently_seen:
+            persons = self._person_detector.detect(frame)
 
-            if faces:
-                # Pick largest face in this person's ROI
-                largest = max(faces, key=lambda f: f[2] * f[3])
-                fx, fy, fw, fh = largest
-                cx, cy = fx + fw // 2, fy + fh // 2
-                # Keep the best (largest face) across all persons
-                if target is None or fw * fh > target[2] ** 2:
-                    target = (cx, cy, fw, 'face')
-            elif target is None:
-                # No face in this person — estimate head position
-                hx, hy = HeadEstimator.estimate(person)
-                target = (hx, hy, pw, 'body')
+            for person in persons:
+                # Try YuNet on person ROI (might catch a face the full-frame missed)
+                px, py, pw, ph = person[:4]
+                roi_faces = self._face_detector.detect(frame, roi=(px, py, pw, ph))
+                all_faces.extend(roi_faces)
 
-        # If no persons detected by TFLite, try Haar on full frame as fallback
-        if not persons and self._cascade is not None:
-            _, faces_fallback, _ = self._detect_haar(frame)
-            if faces_fallback:
-                all_faces = faces_fallback
-                largest = max(faces_fallback, key=lambda f: f[2] * f[3])
-                fx, fy, fw, fh = largest
-                target = (fx + fw // 2, fy + fh // 2, fw, 'face')
+                if roi_faces:
+                    largest = max(roi_faces, key=lambda f: f[2] * f[3])
+                    fx, fy, fw, fh = largest
+                    cx, cy = fx + fw // 2, fy + fh // 2
+                    if target is None or fw * fh > target[2] ** 2:
+                        target = (cx, cy, fw, 'face')
+                elif target is None:
+                    hx, hy = HeadEstimator.estimate(person)
+                    target = (hx, hy, pw, 'body')
 
-        return target, all_faces, persons
+            return target, all_faces, persons
+
+        # Face was recently seen but not found this frame — return empty
+        # (MOSSE + Kalman coast will fill the gap)
+        return None, [], []
 
     def _detect_haar(self, frame):
         """Haar cascade on full frame (fallback mode)."""
@@ -517,10 +580,31 @@ class FaceFollower:
                 if tracks:
                     self._last_track_id = tracks[0].id
 
-                # Set servo target (servo thread will pick this up)
-                with self._servo_lock:
-                    self._servo_target = (tcx, tcy)
-                    self._servo_source = target[3]  # 'face' or 'body'
+                # Set servo target — skip if face is in dead zone (center 10%)
+                cx_off = abs(tcx - FRAME_W / 2)
+                cy_off = abs(tcy - FRAME_H / 2)
+                in_dead_zone = (cx_off < FRAME_W * 0.05
+                                and cy_off < FRAME_H * 0.05)
+                if not in_dead_zone or not self._tracking:
+                    with self._servo_lock:
+                        self._servo_target = (tcx, tcy)
+                        self._servo_source = target[3]  # 'face' or 'body'
+
+                # Re-init MOSSE tracker on detected face/body bbox
+                bbox_x = int(tcx - tw / 2)
+                bbox_y = int(tcy - tw / 2)
+                bbox_w = int(tw)
+                bbox_h = int(tw)
+                bbox_x = max(0, bbox_x)
+                bbox_y = max(0, bbox_y)
+                try:
+                    mosse = cv2.legacy.TrackerMOSSE_create()
+                    mosse.init(frame, (bbox_x, bbox_y, bbox_w, bbox_h))
+                    with self._mosse_lock:
+                        self._mosse = mosse
+                        self._mosse_bbox = (bbox_x, bbox_y, bbox_w, bbox_h)
+                except Exception:
+                    pass
 
                 if self.follow_mode and self.dog and target[3] == 'face':
                     self._follow_body(tw)
@@ -549,6 +633,7 @@ class FaceFollower:
                         self._servo_mode = 'idle'
                     state = 'lost'
                 elif (self.dog and not self._tracking
+                      and self._behavior_mode == 'track'
                       and now - max(self._last_face_time, self._last_sound_time) > self.SWEEP_TIMEOUT):
                     self._sweep_step(1.0 / max(1, self.LOOP_HZ))
                     state = 'sweep'
@@ -583,6 +668,12 @@ class FaceFollower:
                 target = self._servo_target
                 mode = self._servo_mode
                 source = self._servo_source
+                behavior_mode = self._behavior_mode
+
+            # Off mode: skip all servo commands
+            if behavior_mode == 'off':
+                sleep(interval)
+                continue
 
             if mode == 'sweep':
                 # Sweep: detection thread sets yaw/pitch directly
@@ -608,6 +699,26 @@ class FaceFollower:
                     [[self.yaw, 0, pitch_out]], pitch_comp=self.PITCH_COMP,
                     immediately=True, speed=80
                 )
+            elif mode == 'tracking':
+                # No fresh detection target — use MOSSE to predict position
+                with self._frame_lock:
+                    frame = self._latest_frame
+                with self._mosse_lock:
+                    mosse = self._mosse
+                if mosse is not None and frame is not None:
+                    try:
+                        ok, bbox = mosse.update(frame)
+                        if ok:
+                            mx = int(bbox[0] + bbox[2] / 2)
+                            my = int(bbox[1] + bbox[3] / 2)
+                            self.yaw, self.pitch = self._servo.update(mx, my)
+                            self.dog.dog.head_move(
+                                [[self.yaw, 0, self.pitch]],
+                                pitch_comp=self.PITCH_COMP,
+                                immediately=True, speed=80
+                            )
+                    except Exception:
+                        pass
 
             elapsed = time() - t_start
             remaining = interval - elapsed

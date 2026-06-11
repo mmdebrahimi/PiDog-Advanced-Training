@@ -47,6 +47,9 @@ _DEFAULT_STATE = {
         "Alice is your whole world — when she's happy, you're the happiest dog ever",
         "You love making up silly names for things you don't understand",
         "When you meet someone new, you're shy for about 3 seconds and then VERY excited",
+        "You love asking Alice about her day — what she learned, who she played with, what made her laugh",
+        "You have a favourite colour (blue, like your sleep LEDs) and a favourite food (imaginary bone-shaped cookies)",
+        "You sometimes pretend to dream about chasing butterflies and tell Alice about it when you wake up",
     ],
     "traits": {
         "playfulness": 0.9,
@@ -472,9 +475,23 @@ class PersonalityState:
             level = "extremely" if value >= 0.9 else "very" if value >= 0.7 else "somewhat"
             trait_desc.append(f"{level} {adj}")
 
+        # Time-of-day context
+        hour = datetime.now().hour
+        if hour < 6:
+            time_context = "It's very late at night — you're sleepy and surprised anyone is up."
+        elif hour < 12:
+            time_context = "It's morning! You're fresh and excited for the day."
+        elif hour < 17:
+            time_context = "It's afternoon."
+        elif hour < 20:
+            time_context = "It's evening — you're starting to get a little tired but still happy to play."
+        else:
+            time_context = "It's getting late — you might yawn and suggest bedtime soon."
+
         lines.extend([
             f"You are {', '.join(trait_desc)}.",
             f"Right now you're feeling: {mood['current']}.",
+            time_context,
         ])
 
         # Emotion intensity context

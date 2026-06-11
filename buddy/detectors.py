@@ -156,6 +156,68 @@ class FaceDetector:
         return results
 
 
+class YuNetDetector:
+    """Detect faces using OpenCV's YuNet DNN model.
+
+    Better than Haar at side faces, tilted faces, and partial occlusion —
+    critical for ground-level robot dog camera. ~25 FPS on Pi 4 at 320x240.
+    """
+
+    DEFAULT_MODEL_PATH = str(
+        Path(__file__).parent / "models" / "face_detection_yunet.onnx"
+    )
+
+    def __init__(self, model_path=None, score_threshold=0.7, input_size=(320, 240)):
+        model_path = model_path or self.DEFAULT_MODEL_PATH
+        if not Path(model_path).exists():
+            raise RuntimeError(f"YuNet model not found at {model_path}")
+        self._input_size = input_size
+        self._detector = cv2.FaceDetectorYN.create(
+            model_path, "", input_size,
+            score_threshold=score_threshold,
+            nms_threshold=0.3,
+            top_k=10,
+        )
+
+    def detect(self, frame, roi=None):
+        """Detect faces in a frame or ROI.
+
+        Args:
+            frame: numpy array (H, W, 3) uint8.
+            roi: optional (x, y, w, h) tuple to restrict detection area.
+
+        Returns:
+            List of (x, y, w, h) face bounding boxes in original frame coordinates.
+        """
+        if roi is not None:
+            rx, ry, rw, rh = roi
+            crop = frame[ry:ry+rh, rx:rx+rw]
+            offset_x, offset_y = rx, ry
+        else:
+            crop = frame
+            offset_x, offset_y = 0, 0
+
+        ch, cw = crop.shape[:2]
+        resized = cv2.resize(crop, self._input_size)
+        scale_x = cw / self._input_size[0]
+        scale_y = ch / self._input_size[1]
+
+        self._detector.setInputSize(self._input_size)
+        _, raw = self._detector.detect(resized)
+
+        results = []
+        if raw is not None:
+            for det in raw:
+                # YuNet output: x, y, w, h, ..., score
+                fx = int(det[0] * scale_x) + offset_x
+                fy = int(det[1] * scale_y) + offset_y
+                fw = int(det[2] * scale_x)
+                fh = int(det[3] * scale_y)
+                if fw > 10 and fh > 10:
+                    results.append((fx, fy, fw, fh))
+        return results
+
+
 class HeadEstimator:
     """Estimate head position from a person bounding box when no face is detected.
 

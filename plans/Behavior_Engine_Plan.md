@@ -1,75 +1,112 @@
 # Behavior Engine for PiDog
 
-> Centralize Nounou's decision-making into a priority-based behavior engine that orchestrates head tracking, actions, LEDs, and voice context based on all sensor inputs.
+> Centralize Nounou's decision-making into a priority-based behavior engine that replaces scattered inline logic in companion.py's main loop.
 
 ---
 
 ## Problem Statement
 
-Nounou's behavior logic is scattered across modules — `face_follower.py` decides where to look, `companion.py` decides what to say, `room_awareness.py` tracks who's here, and they communicate via shared state and callbacks. There's no central "brain" that reasons about what the dog should be doing right now. This makes it hard to add new behaviors (greet on arrival, rest when alone, react to touch) and leads to conflicting actions (sound direction fighting servo thread, sweep fighting tracking).
+Nounou's behavior logic was scattered across companion.py's main loop (~100 lines of inline state management), face_follower.py (sweep/track decisions), personality.py (idle ticks), and room_awareness.py (arrivals/departures). Adding new behaviors required editing the main loop directly, and there was no single place that answered "what should the dog be doing right now?" This led to conflicting actions (sweep fighting tracking) and made the system hard to extend.
 
 ## Design Decisions
 
 ### D1: Priority-based state machine, not LLM orchestrator
 
-**Decision:** Use a simple priority lookup evaluated every 500ms, not an LLM call to decide behavior.
+**Decision:** Use a simple priority lookup evaluated every tick, not an LLM call to decide behavior.
 
 **Rationale:** An LLM call adds 500ms latency and API cost per decision. A priority lookup is instant and deterministic. The LLM handles conversation; the engine handles behavior selection.
 
 **Trade-off:** Less flexible than LLM reasoning, but fast, predictable, and debuggable.
 
-### D2: Behaviors as skill sequences, not agent frameworks
+### D2: Engine sets mode, FaceFollower obeys
 
-**Decision:** Each behavior is a sequence of direct commands (SetMood, Action, LookAt, LEDs, InjectContext), not an LLM agent.
+**Decision:** Added `set_behavior_mode()` to FaceFollower. Engine sets high-level mode ('track', 'idle', 'off'); FaceFollower adjusts its own sweep/servo behavior within that mode. Engine does NOT own servo control.
 
-**Rationale:** The 30 existing dog actions are already the skill layer. The engine just needs to know when to trigger them. No new abstraction framework needed.
+**Rationale:** FaceFollower already has a battle-tested 30 Hz servo thread with its own sweep/track/coast state machine. Inserting the engine between detection and servos would add latency and create two competing decision-makers for head motion. Instead, the engine acts as a coordinator.
 
-### D3: Start with 5 behaviors
+**Trade-off:** Rejected extracting sweep logic from FaceFollower — less invasive, preserves existing servo loop.
 
-**Decision:** GREET, TRACK, SEARCH, REST, SLEEP. Add more only when Alice asks for them.
+### D3: RESPOND removed from priority list
 
-**Rationale:** Avoid over-engineering. These 5 cover the core experience.
+**Decision:** Voice handling stays callback-driven via RealtimeVoice. No RESPOND behavior in the engine.
+
+**Rationale:** Voice is asynchronous (Realtime API pushes audio events). The engine can't "decide" to respond. Including it would be misleading — either a no-op or a source of confusion about who owns voice state.
+
+### D4: LED ownership contract
+
+**Decision:** Engine owns ambient/behavior LEDs. Voice callbacks own transient LEDs (speaking=pink, thinking=yellow). `engine.restore_leds()` bridges them — called by `on_speaking_end` to return to behavior LEDs.
+
+**Rationale:** LEDs were previously set in 4 places with no clear ownership. Without a contract, the engine's LED choices would be overwritten every time the dog speaks.
+
+### D5: Start with 5 behaviors
+
+**Decision:** GREET, TRACK, SEARCH, REST, SLEEP. No RESPOND.
+
+**Rationale:** These 5 cover the core experience. Adding more only when needed avoids over-engineering.
 
 ## Implementation Plan
 
-### Step 1: Create BehaviorEngine
+### Step 1: Add `set_behavior_mode()` to FaceFollower
 
-File: `buddy/behavior_engine.py` (new, ~200 lines)
+**File:** `buddy/face_follower.py`
 
-- `BehaviorEngine` class with 500ms tick
-- Reads inputs: RoomState, TrackingState, VoiceState, PersonalityState, touch sensors, time of day
-- Evaluates priority list, picks highest active behavior
-- Each behavior controls: head target, body action, LED pattern, voice context injection, mood update
+- Added `_behavior_mode` flag (default: `'track'`) and thread-safe `set_behavior_mode()` method
+- Modified detection loop: sweep only triggers when `_behavior_mode == 'track'`
+- Modified servo loop: skip all servo commands when `_behavior_mode == 'off'`
+- Detection thread still runs in all modes (RoomState/SpatialMemory keep updating)
 
-Behaviors (highest priority wins):
-1. **GREET** — person just arrived (< 5s ago) → wag tail, look at them, excitement spike, inject greeting context
-2. **TRACK** — person visible → follow with head servos
-3. **RESPOND** — voice input detected → engage (existing voice handling)
-4. **SEARCH** — no one visible for 3s → slow sweep
-5. **REST** — no one for 10+ minutes → doze off, dim LEDs, low energy
-6. **SLEEP** — commanded to sleep → lie down, blue LEDs, touch wake
+### Step 2: Add `set_leds()` to DogBehavior
 
-### Step 2: Integrate into companion.py
+**File:** `buddy/dog_behavior.py`
 
-File: `buddy/companion.py` (modify)
+- Added `set_leds(mode, color, bps)` wrapper around `dog.rgb_strip.set_mode()`
 
-- Replace direct state management in main loop with `engine.tick()`
-- Engine reads shared state, makes decisions, issues commands
-- Voice callbacks still handle conversation; engine handles everything else
-- Remove scattered behavior logic (sweep triggers, room print, instruction updates) — engine owns these
+### Step 3: Create BehaviorEngine
 
-### Step 3: LED integration
+**File:** `buddy/behavior_engine.py` (new)
 
-File: `buddy/dog_behavior.py` (modify)
+- `BehaviorEngine` class with priority-based `tick()` method
+- Priority list (highest wins):
+  1. SLEEP — `sleeping == True` → FaceFollower OFF, blue LEDs, poll touch
+  2. GREET — person arrived <5s → wag tail, excitement spike, greeting context injection
+  3. TRACK — person visible → FaceFollower TRACK, green LEDs, personality ticks, jealousy
+  4. SEARCH — no one visible → FaceFollower TRACK (built-in sweep), blue LEDs
+  5. REST — alone >10min → FaceFollower IDLE, doze off, dim white LEDs
+- Sleep/wake lifecycle: `go_to_sleep()` and `wake_up(source)` with rituals
+- LED management: `_set_leds(behavior)` and `restore_leds()` for voice callback bridge
+- Room updates rate-limited to 2s (matches old behavior)
+- Instruction updates rate-limited to 10s
+- Personality ticks every 10s (spontaneous actions + jealousy)
 
-- Add `set_leds(mode, color, speed)` method wrapping `dog.rgb_strip.set_mode()`
-- Behaviors set LED patterns: excited=rainbow, tracking=green pulse, searching=blue scan, rest=dim white, sleep=blue breath
+### Step 4: Integrate into companion.py
+
+**File:** `buddy/companion.py`
+
+- Removed: `sleeping` flag, `wake_up()`, `on_sleep()`, arrival/departure hooks, stranger detection, instruction updates, idle ticks, jealousy checks, touch wake polling, `_SPONTANEOUS_ACTION_MAP`, all rate-limiting state (~100 lines removed)
+- Added: `BehaviorEngine` init, `engine.tick()` in main loop, voice callbacks wired to engine
+- Main loop reduced to ~10 lines
+- `on_speaking_end` calls `engine.restore_leds()` instead of `dog.idle()`
+- `on_sleep` wired directly to `engine.go_to_sleep`
+- `on_touch_event` simplified (personality hook only, engine handles context injection)
 
 ## Verification
 
-1. Start companion → engine prints current behavior state
-2. Walk into room → GREET triggers (wag, greeting)
-3. Stay visible → transitions to TRACK (smooth following)
-4. Leave room → SEARCH after 3s (sweep), REST after 10min (doze off)
-5. Say "goodnight" → SLEEP (lie down, blue LEDs, touch wake)
-6. Pat head → GREET (wake up, excited)
+1. **Start companion:** `source ~/pidog_lab/.venv/bin/activate && python3 -m buddy.companion`
+   - Engine prints transitions: `[Engine] TRACK -> SEARCH`
+   - LEDs match behavior state
+
+2. **Walk into room** -> GREET triggers (wag, greeting context injected)
+
+3. **Stay visible** -> Transitions to TRACK (green LEDs, head follows)
+
+4. **Leave room** -> After 3s: SEARCH (FaceFollower sweeps). After 10min: REST (doze off, dim LEDs)
+
+5. **Say "goodnight"** -> SLEEP (lie down, blue LEDs, servos off)
+
+6. **Pat head during sleep** -> `wake_up()`, stretch ritual, transitions to GREET or TRACK
+
+7. **Ctrl+C** -> Graceful shutdown (unchanged)
+
+8. **Video mode:** `python3 -m buddy.companion --video` — same behaviors + video overlay
+
+9. **Regression check:** Face tracking smoothness unchanged (30 Hz servo thread untouched). Voice latency unchanged (callbacks not modified). Personality state persists across sessions.

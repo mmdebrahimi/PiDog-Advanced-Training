@@ -102,8 +102,15 @@ MuJoCo 3.6.0 (physics engine, CPU-only)
 
 **Architecture:**
 ```
-companion.py (orchestrator: voice + tracking + room awareness)
+companion.py (init + main loop: pumps video, calls engine.tick())
     |
+    ├── behavior_engine.py (priority state machine, 2s tick)
+    │     ├── Reads: RoomState, PersonalityState, FaceFollower.is_tracking()
+    │     ├── Sets: FaceFollower behavior mode (track/idle/off)
+    │     ├── Controls: LED patterns, spontaneous actions, context injection
+    │     ├── Owns: sleep/wake lifecycle, arrival/departure hooks, jealousy
+    │     └── Behaviors: SLEEP > GREET > TRACK > SEARCH > REST
+    │
     ├── realtime_voice.py → WebSocket to gpt-4o-realtime-preview
     │     ├── Mic (sounddevice via PulseAudio, 24kHz) → server-side VAD → model
     │     ├── Audio response → HDMI output
@@ -114,14 +121,15 @@ companion.py (orchestrator: voice + tracking + room awareness)
     │     ├── Detection thread (~10 FPS): capture → TFLite person detect
     │     │     → Haar face detect (every 3rd frame) → SORT tracker
     │     │     → face ID submission → write servo target
-    │     └── Servo thread (30 Hz): read target → proportional + EMA → head_move()
+    │     ├── Servo thread (30 Hz): read target → proportional + EMA → head_move()
+    │     └── set_behavior_mode(): engine controls track/idle/off
     │
     ├── servo_controller.py → proportional + adaptive EMA (no Kalman — SORT handles that)
     ├── detectors.py → PersonDetector (TFLite SSD), FaceDetector (Haar), HeadEstimator
     ├── tracker.py → SORT (Kalman per track + Hungarian assignment via scipy)
     ├── face_id.py → FaceEmbedder (SFace 128-dim) + FaceDatabase (JSON) + async worker
     ├── room_awareness.py → who's here, where last seen, LLM context summaries
-    ├── dog_behavior.py → Pidog + ActionFlow (24 physical behaviors)
+    ├── dog_behavior.py → Pidog + ActionFlow (30 physical behaviors) + LED control
     └── memory.py → ~/.config/pidog/pidog-longterm-memory.md
 ```
 
@@ -148,11 +156,18 @@ Camera (OV5647 CSI, 640×480)
 - Yaw limited to ±55° to protect CSI ribbon cable
 - Video display: `QT_QPA_PLATFORM=xcb` required for OpenCV QT5 backend
 
+**Audio output selection:**
+- BT speaker auto-detected at startup (scans for bluez/bluetooth PulseAudio sinks)
+- Falls back to HDMI if no BT speaker paired
+
 **Persistent state:**
 - Names: `~/.config/pidog/names.json`
-- Memory: `~/.config/pidog/pidog-longterm-memory.md`
+- Legacy memory: `~/.config/pidog/pidog-longterm-memory.md` (flat, v1 fallback)
+- Semantic memory: `~/.config/pidog/semantic_memory.json` (per-person facts, milestones, topics)
+- Episodic memory: `~/.config/pidog/episodic_memory.json` (rolling session summaries)
 - Known faces: `~/.config/pidog/known_faces.json`
 - API key: `~/.config/pidog/openai_key`
+- Usage log: `~/.config/pidog/usage.json` (session durations for API cost awareness)
 - Models: `buddy/models/` (SFace 37MB, YuNet 0.2MB — auto-downloaded from OpenCV Zoo)
 
 ## Known Library Issues

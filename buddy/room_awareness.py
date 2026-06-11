@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from time import time
 
 
+from .spatial_memory import pixel_to_absolute_angle, bbox_to_distance_bin
+
+
 @dataclass
 class PersonState:
     """State of a person known to the room."""
@@ -15,8 +18,12 @@ class PersonState:
     track_id: int = -1
     last_yaw: float = 0.0
     last_pitch: float = 0.0
+    last_abs_yaw: float = 0.0
+    last_abs_pitch: float = 0.0
+    distance_bin: str = ""
     last_seen: float = 0.0
     visible: bool = False
+    coasting: bool = False
 
 
 class RoomState:
@@ -62,6 +69,16 @@ class RoomState:
                 ps.last_pitch = current_pitch
                 ps.last_seen = now
                 ps.visible = True
+                ps.coasting = False
+
+                # Compute absolute angular position from bbox
+                bbox = person.get("bbox")
+                if bbox and len(bbox) >= 4:
+                    x, y, w, h = bbox
+                    cx, cy = x + w / 2, y + h / 2
+                    ps.last_abs_yaw, ps.last_abs_pitch = pixel_to_absolute_angle(
+                        cx, cy, current_yaw, current_pitch)
+                    ps.distance_bin = bbox_to_distance_bin(h)
 
                 # Clean up from unknown tracks if was there
                 self._unknown_tracks.pop(tid, None)
@@ -108,13 +125,21 @@ class RoomState:
             return f"I don't know {name}."
 
         now = time()
+        # Prefer absolute yaw if available
+        yaw = ps.last_abs_yaw if ps.last_abs_yaw != 0.0 else ps.last_yaw
+
         if ps.visible:
-            direction = self._yaw_to_direction(ps.last_yaw)
-            return f"{name} is {direction}."
+            direction = self._yaw_to_direction(yaw)
+            distance = ""
+            if ps.distance_bin == "near":
+                distance = ", very close"
+            elif ps.distance_bin == "far":
+                distance = ", across the room"
+            return f"{name} is {direction}{distance}."
 
         elapsed = now - ps.last_seen
         if elapsed < self.PRESENCE_TIMEOUT:
-            direction = self._yaw_to_direction(ps.last_yaw)
+            direction = self._yaw_to_direction(yaw)
             return f"{name} was {direction} {self._format_ago(elapsed)} ago."
 
         return f"I haven't seen {name} in a while."
@@ -160,9 +185,13 @@ class RoomState:
     @staticmethod
     def _yaw_to_direction(yaw):
         """Convert yaw angle to human-readable direction."""
-        if yaw < -30:
+        if yaw < -40:
+            return "far to your right"
+        elif yaw < -15:
             return "to your right"
-        elif yaw > 30:
+        elif yaw > 40:
+            return "far to your left"
+        elif yaw > 15:
             return "to your left"
         else:
             return "in front of you"

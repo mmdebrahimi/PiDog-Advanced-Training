@@ -19,9 +19,12 @@ MAX_CONTEXT_WORDS = 500
 class MemoryCompiler:
     """Compiles all memory sources into LLM-ready context."""
 
-    def __init__(self, social_graph=None, personality=None):
+    def __init__(self, social_graph=None, personality=None,
+                 semantic_memory=None, episodic_memory=None):
         self.graph = social_graph or SocialGraph()
         self.personality = personality or PersonalityState()
+        self.semantic = semantic_memory
+        self.episodic = episodic_memory
 
         # Seed social graph with owner from names.json if empty
         seed_from_names(self.graph)
@@ -43,19 +46,43 @@ class MemoryCompiler:
         if people_text and people_text != "You don't know anyone yet.":
             sections.append(f"PEOPLE YOU KNOW:\n{people_text}")
 
-        # 3. Recent memory facts
-        memory_text = memory.load_memory()
-        if memory_text:
-            facts = [l.strip() for l in memory_text.split("\n")
-                     if l.strip().startswith("- ")]
-            if facts:
-                # Keep most recent 10 facts
-                recent = facts[-10:]
-                sections.append("RECENT MEMORY:\n" + "\n".join(recent))
+        # 3. Per-person memory (semantic + episodic)
+        if self.semantic or self.episodic:
+            # Get people currently visible or recently here
+            memory_people = set()
+            if room_summary:
+                # Extract names from room summary (simple heuristic)
+                for name in self.graph.people:
+                    if name.lower() in room_summary.lower():
+                        memory_people.add(name)
+            if not memory_people:
+                memory_people.add(config.CHILD_NAME)
 
-        # 4. Vision (live room state)
+            memory_parts = []
+            for person in memory_people:
+                if self.semantic:
+                    sem_ctx = self.semantic.get_context(person, max_facts=5)
+                    if sem_ctx:
+                        memory_parts.append(sem_ctx)
+                if self.episodic:
+                    epi_ctx = self.episodic.get_context(person, limit=2)
+                    if epi_ctx:
+                        memory_parts.append(epi_ctx)
+            if memory_parts:
+                sections.append("\n".join(memory_parts))
+        else:
+            # Fallback to flat memory (backward compat)
+            memory_text = memory.load_memory()
+            if memory_text:
+                facts = [l.strip() for l in memory_text.split("\n")
+                         if l.strip().startswith("- ")]
+                if facts:
+                    recent = facts[-10:]
+                    sections.append("RECENT MEMORY:\n" + "\n".join(recent))
+
+        # 4. Vision / Spatial awareness (live room state)
         if room_summary:
-            sections.append(f"VISION — What you can see right now:\n{room_summary}")
+            sections.append(f"SPATIAL AWARENESS — What you can see and remember:\n{room_summary}")
 
         # 5. Behavioral rules
         sections.append(
