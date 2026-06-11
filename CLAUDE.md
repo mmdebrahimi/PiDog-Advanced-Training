@@ -1,5 +1,8 @@
 # PiDog Lab — Claude Instructions
 
+## CRITICAL: Session Persistence
+Sessions are lost on every Pi restart. Update memory files (`~/.claude/projects/-home-pidog/memory/`) DURING the session — after every significant change, not just at the end. The Pi restarts frequently. If you wait until session end to save, the work is lost. Commit code early and often too (`git add` + `git commit`).
+
 ## Workspace
 - Project root: `~/pidog_lab/`
 - Venv: `source ~/pidog_lab/.venv/bin/activate`
