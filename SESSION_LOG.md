@@ -17,10 +17,14 @@
 CSI cable keeps disconnecting. User plans to reposition Pi board so CSI port faces head. Camera passed `rpicam-hello` test at end of session.
 
 ### What's next
-1. Reposition Pi board (hardware)
-2. Add BT speaker
-3. Enroll Alice's face
-4. Test everything live
+1. **TOMORROW MORNING: First Alice test** — run `python3 -u -m buddy.companion` and let Alice talk to Nounou. Test checklist:
+   - Walk into room → GREET with her name?
+   - Voice conversation working?
+   - Smooth head tracking (no jitter)?
+   - "Goodnight" → sleep, head pat → wake
+   - "Shutdown" → full stop
+2. Add BT speaker (so audio comes from the dog)
+3. Reposition Pi board if CSI cable still disconnects
 
 ### Git status
 All code committed via auto-save cron. Plans archived to `executed_plans/`.
