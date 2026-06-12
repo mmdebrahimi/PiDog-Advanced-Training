@@ -1,0 +1,5 @@
+HOW TO USE:
+1. Unzip this folder
+2. Open a Command Prompt in this folder
+3. Run:  rename train_nounou.bat.txt train_nounou.bat
+4. Run:  train_nounou.bat
