@@ -91,12 +91,28 @@ env*, not as a standalone walker.
 
 All 8 are artifacts of the missing base gait. None indicates a model problem.
 
-## 6. Artifacts on this branch
+## 6. What this branch changes
 
-- `train_ckpt.py` — checkpointed trainer (`--resume`, `--reset-std`, `--gamma`, `--ent-coef`)
-- `pidog_env.py` — reward made env-var tunable; **defaults reproduce canonical behavior exactly**
-- `pidog_fixed.xml` — **IGNORE / DELETE.** Product of the retracted axis theory. The stock
-  `pidog.xml` is correct.
+Ported from `D:\pidog-Experiment\` (the working tree) into the repo root:
+
+- `pidog_env.py` — **now the 29-dim residual env** (was 27-dim direct control)
+- `train.py` — **now checkpoints** (`CheckpointCallback`), as the working tree always did
+- `eval_mvp.py` — the correct, code-owned MVP gate. **Was missing from this repo.**
+- `extract_weights.py`, `gait_diagnose.py`, `train_warmstart.py` — also missing; added
+
+Quarantined / flagged:
+
+- `experimental/pidog_env_direct_control.py` — the old 27-dim env, with a header recording the
+  8-config negative result. Nothing imports it.
+- `rl_training_package/pidog_env.py` (27-dim) and `sim/pidog_env.py` (24-dim) — also lack a base
+  gait. **Flagged, not benchmarked** — I did not run them. Prefer the root env; gate any result
+  from them with `eval_mvp.py`.
+
+Removed: `train_ckpt.py` (redundant — the ported `train.py` checkpoints) and `pidog_fixed.xml`
+(artifact of the retracted axis theory; stock `pidog.xml` is correct).
+
+**Verification:** `eval_mvp.py <run15 policy> 5` run *in this repo tree* →
+`mean_forward_mm=432 mean_lateral_mm=311 mean_steps=1000` → **MVP PASS** (exit 0).
 
 ## 7. Actual critical path (unchanged by any of this)
 

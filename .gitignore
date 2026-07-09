@@ -47,3 +47,8 @@ logs/
 
 # Temp
 tmp/
+checkpoints/
+*.zip
+train_*.log
+sim_trot.mp4
+pidog_policy*

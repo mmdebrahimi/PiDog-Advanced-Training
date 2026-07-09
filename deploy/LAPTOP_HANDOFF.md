@@ -1,3 +1,30 @@
+> ## ⚠ SUPERSEDED IN PART — read `LAPTOP_FINDINGS_2026-07-09.md` first
+>
+> **Tasks 1 & 2 (BC pretrain + PPO from scratch) are obsolete.** They targeted the repo's old
+> 27-dim direct-control `pidog_env.py`, which cannot learn to walk: 8 PPO configurations
+> (~3.5 h CPU) all converged to standing still (~15 mm) or a forward dive that falls by step ~35.
+>
+> The repo-root env is now the **29-dim residual env** (policy emits a small residual on a scripted
+> symmetric trot), ported from `D:\pidog-Experiment\`. The old env is quarantined at
+> `experimental/pidog_env_direct_control.py`. **A walking policy already exists and passes the gate**
+> (`eval_mvp.py` on run15: `mean_forward_mm=432, mean_steps=1000` -> MVP PASS); see
+> `deploy/policy_straight_trot.npz`. **No retraining from scratch is required.**
+>
+> Corrections to specific claims below:
+> - "scripted trot ~190 mm/cycle forward" -- run standalone, `sim_trot.py` measures **-74.4 mm**
+>   (backward) and falls over. It works only as a *base gait inside* the residual env.
+> - "success: ep_rew_mean>500, ep_len_mean=1000" -- **gameable**: both are satisfied by a robot
+>   standing perfectly still (reward 586.86, forward 15.7 mm). Use `eval_mvp.py` instead
+>   (`fwd>=200mm`, `steps>=800`, `fwd>|lateral|`).
+> - The laptop has **no CUDA** (torch CPU-only). MuJoCo is CPU-native; this is not a blocker.
+> - `train.py` now checkpoints again (the version this handoff referenced did not, and a
+>   1.0M-step run at `ep_rew_mean=527` was lost to an interruption).
+>
+> Task 3 (stand_doctor tests) stands: **37 passed / 1 skipped** (the skip is a Linux-only symlink
+> test). The real critical path remains the physical stand-fix, not sim work.
+
+---
+
 # Laptop Handoff — RL Training Tasks
 
 > Tasks that need GPU compute. Run on the laptop (Windows, CUDA, Python 3.10 .venv).

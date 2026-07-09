@@ -26,7 +26,6 @@ IMPORTANT: MuJoCo ctrl expects RADIANS at runtime, even when compiler angle="deg
 The degree setting only affects XML attribute parsing, not runtime ctrl values.
 """
 
-import math
 import os
 import numpy as np
 import gymnasium as gym
@@ -44,6 +43,15 @@ STAND_DEG = np.array([25, 35, -25, -35, 35, 35, -35, -35], dtype=np.float64)
 # With STAND values up to ±35 and ctrlrange=±80, this gives ample headroom.
 ACTION_RANGE = 15.0
 
+# --- Residual control around the scripted symmetric trot (sim_trot.py) ---
+# The policy outputs a SMALL residual on top of a known-symmetric diagonal trot,
+# so the asymmetric one-leg-up exploit (which curved all 12 prior reward-shaped
+# runs) becomes a large, costly residual. Base gait is correct by construction.
+GAIT_LIFT = 30.0    # knee bend increase for swing (matches sim_trot.py)
+GAIT_SWING = 10.0   # hip fwd/back offset for swing/stance (matches sim_trot.py)
+RESIDUAL_DEG = 12.0  # run15: back to 12 (run13's value gave straight+symmetric yaw=5deg;
+                     # run14's 18 over-authorized -> broke symmetric base -> flail+fall)
+
 
 class PiDogEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 25}
@@ -55,12 +63,35 @@ class PiDogEnv(gym.Env):
         self.model = mujoco.MjModel.from_xml_path(MODEL_PATH)
         self.data = mujoco.MjData(self.model)
 
+        # Domain randomization (sim-to-real robustness) — enabled via env PIDOG_DR=1.
+        # OFF by default so eval/diagnostics measure cleanly.
+        self._dr = os.environ.get("PIDOG_DR", "0") == "1"
+        self._nominal_body_mass = self.model.body_mass.copy()
+        self._nominal_friction = self.model.geom_friction.copy()
+        self._smooth_alpha = 0.8
+
+        # Gait-SMOOTHNESS reward terms — enabled via env PIDOG_SMOOTH=1. OFF by
+        # default so the run18/19 baseline reward is reproduced exactly. Targets the
+        # persistent LH-back-foot-held-up asymmetry (phase-correct planting), air-pawing
+        # (over-lift), and residual thrash (jerk). MUST be warm-started off an already-
+        # walking policy — a jerk penalty from scratch collapsed runs 16/17 to standing.
+        self._smooth = os.environ.get("PIDOG_SMOOTH", "0") == "1"
+        # Extra body-frame lateral penalty (smooth-mode only), env-tunable. Default 0 =
+        # reproduces run21 exactly. Used to kill run21's under-DR CRAB regression without
+        # touching the run18/19 baseline reward.
+        self._lat_extra = float(os.environ.get("PIDOG_LAT_EXTRA", "0"))
+        # Tunable smoothness coefficients (defaults reproduce run21). Lets the overnight
+        # sweep try GENTLER shaping that keeps DR-forward progress.
+        self._k_contact = float(os.environ.get("PIDOG_SMOOTH_CONTACT", "0.15"))
+        self._k_overlift = float(os.environ.get("PIDOG_SMOOTH_OVERLIFT", "2.0"))
+        self._k_jerk = float(os.environ.get("PIDOG_SMOOTH_JERK", "0.10"))
+
         self.n_substeps = 10          # 10 × 2ms = 20ms per control step (50Hz)
         self.max_episode_steps = 1000  # 1000 × 20ms = 20 seconds max
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(8,), dtype=np.float32)
         self.observation_space = spaces.Box(
-            -np.inf, np.inf, shape=(27,), dtype=np.float32
+            -np.inf, np.inf, shape=(29,), dtype=np.float32  # +2 gait-clock [sin, cos]
         )
 
         self._renderer = None
@@ -78,6 +109,19 @@ class PiDogEnv(gym.Env):
         self._gyro_sensor_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_SENSOR, "imu_gyro"
         )
+
+        # Gait-clock: a phase signal that advances each control step. The policy
+        # sees [sin, cos] of it and is rewarded for trotting in time with it.
+        # Foot order LF, RF, LH, RH; diagonal trot pairs = (LF,RH) and (RF,LH).
+        self._foot_ids = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f)
+            for f in ("lf_foot", "rf_foot", "lh_foot", "rh_foot")
+        ]
+        self.GAIT_FREQ_HZ = 2.0                       # trot cadence
+        self._phase_inc = 2.0 * np.pi * self.GAIT_FREQ_HZ / 50.0  # 50Hz control
+        self._phase = 0.0
+        self._yaw0 = 0.0                              # initial heading, set in reset()
+        self.CONTACT_Z = 0.012                        # foot "down" below 12mm
 
     def _get_obs(self):
         """Build 27-dim observation vector with manual normalization."""
@@ -100,86 +144,104 @@ class PiDogEnv(gym.Env):
         # Normalize height so ~1.0 when standing (actual height ≈ 0.053m)
         torso_z = np.array([self.data.qpos[2] / 0.05])
 
-        return np.concatenate([
+        clock = np.array([np.sin(self._phase), np.cos(self._phase)])  # gait-clock
+
+        obs = np.concatenate([
             joint_pos_norm,   # 8
             joint_vel_norm,   # 8
             torso_quat,       # 4
             torso_vel,        # 3
             torso_gyro,       # 3
             torso_z,          # 1
+            clock,            # 2  (sin, cos of gait phase)
         ]).astype(np.float32)
+        # DR: sensor noise on the 27 measured dims (NOT the 2 clock dims — those are exact on deploy too)
+        if self._dr:
+            obs[:27] += self.np_random.normal(0, 0.02, size=27).astype(np.float32)
+        return obs
+
+    def _scripted_trot_deg(self):
+        """Scripted symmetric diagonal-trot target joints (deg) for the current phase.
+
+        Phase-driven version of sim_trot.py's 2-frame gait, locked to the gait clock:
+        sin(phase) >= 0 -> frame A (LF,RH stance / RF,LH swing); else frame B.
+        Joint order [LF_hip, LF_knee, RF_hip, RF_knee, LH_hip, LH_knee, RH_hip, RH_knee].
+        """
+        s = STAND_DEG
+        L, S = GAIT_LIFT, GAIT_SWING
+        if np.sin(self._phase) >= 0:
+            # Frame A: LF+RH stance (hip fwd, knee normal), RF+LH swing (hip back, knee bent)
+            return np.array([
+                s[0] - S, s[1],          # LF stance
+                s[2] - S, s[3] - L,      # RF swing
+                s[4] + S, s[5] + L,      # LH swing
+                s[6] + S, s[7],          # RH stance
+            ], dtype=np.float64)
+        # Frame B: RF+LH stance, LF+RH swing
+        return np.array([
+            s[0] + S, s[1] + L,          # LF swing
+            s[2] + S, s[3],              # RF stance
+            s[4] - S, s[5],              # LH stance
+            s[6] - S, s[7] - L,          # RH swing
+        ], dtype=np.float64)
 
     def _compute_reward(self, action, terminated):
-        """Compute shaped reward encouraging forward locomotion while staying upright.
+        """Residual-mode reward: go forward along the initial heading, straight + upright.
 
-        Reward = FORWARD_WEIGHT*forward_vel + ALIVE_BONUS - penalties - 10 on termination.
-
-        NOTE (2026-07-09): the original comment claimed "standing earns +1.0/step from the
-        alive bonus, walking earns +1.0 + velocity bonus". That is FALSE -- walking also
-        incurs energy/smoothness/lateral/vertical penalties (dP ~ 0.2-0.4/step) that
-        standing does not. At the 500mm target speed (0.025 m/s) the old velocity term paid
-        only 5*0.025 = 0.125/step < dP, so STANDING STILL strictly dominated walking.
-        Confirmed empirically: a 1.5M-step run reached ep_rew_mean=586, ep_len_mean=1000,
-        forward=15.7mm. Raising ent_coef 0.01->0.05 (per train.py:64) did NOT help -- policy
-        std exploded to 18.1 and it fell at step 40. The barrier is the reward, not exploration.
-
-        Both terms are env-var tunable; the defaults reproduce the original reward exactly.
+        The base gait is the scripted SYMMETRIC trot, so there is NO 'discover-a-gait'
+        contact reward (that is what every prior reward-shaped run gamed into an
+        asymmetric curve). Here `action` IS a small residual, so we only need:
+        forward progress along +x (initial heading), heading discipline (don't curve),
+        no lateral slide, stay upright/at height, and keep the residual small.
         """
-        forward_weight = float(os.environ.get("PIDOG_FORWARD_WEIGHT", "5.0"))
-        alive_bonus = float(os.environ.get("PIDOG_ALIVE_BONUS", "1.0"))
-
-        forward_vel = self.data.qvel[0]
+        forward_vel = self.data.qvel[0]   # world +x == initial heading (reset faces +x)
         lateral_vel = self.data.qvel[1]
-        vertical_vel = self.data.qvel[2]
         torso_z = self.data.qpos[2]
 
-        alive = alive_bonus if forward_vel > -0.01 else 0.0
+        # Yaw deviation from the initial (+x) heading
+        q = self.data.qpos[3:7]
+        yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+        yaw_err = np.arctan2(np.sin(yaw - self._yaw0), np.cos(yaw - self._yaw0))
 
-        energy_penalty = np.sum(np.square(action)) * 0.05
-
-        # Extract torso up-vector from rotation matrix; penalize xy tilt
+        # Upright + height keep
         body_xmat = self.data.xmat[self._torso_body_id].reshape(3, 3)
         up_vec = body_xmat[:, 2]
-        orientation_penalty = np.sum(np.square(up_vec[:2])) * 5.0  # was 2.0 — force upright
-
-        height_target = 0.05  # actual standing height with STAND_DEG bent legs
-        height_penalty = abs(torso_z - height_target) * 3.0
-
-        lateral_penalty = abs(lateral_vel) * 3.0  # was 1.0 — discourage diagonal drift
-        vertical_penalty = abs(vertical_vel) * 1.0
-
-        # Penalize difference from previous action to encourage smooth gaits
-        smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.1  # moderate: discourages vibration without blocking movement
-
-        # Reward mode. "linear" (default) reproduces the canonical W*v term, which has TWO
-        # degenerate optima: v=0 pays nothing but costs nothing (standing wins when dP >
-        # W*v), and larger v always pays more (diving wins under a short horizon). Both were
-        # observed across 6 runs. "target" makes both unreachable: payoff peaks at v_target
-        # and DECAYS on either side, so standing is near-worthless and diving buys nothing.
-        if os.environ.get("PIDOG_REWARD_MODE", "linear") == "target":
-            v_target = float(os.environ.get("PIDOG_VEL_TARGET", "0.15"))
-            v_sigma = float(os.environ.get("PIDOG_VEL_SIGMA", "0.10"))
-            v_weight = float(os.environ.get("PIDOG_VEL_WEIGHT", "3.0"))
-            forward_term = v_weight * math.exp(-((forward_vel - v_target) ** 2) / (v_sigma ** 2))
-        else:
-            forward_term = forward_weight * forward_vel
+        orientation_penalty = np.sum(np.square(up_vec[:2])) * 2.0
+        height_penalty = abs(torso_z - 0.05) * 3.0
 
         reward = (
-            forward_term
-            + alive
-            - energy_penalty
+            6.0 * forward_vel                       # run18: back to 6 (MVP value); action-rate penalty (not forward) was killing motion
+            + 0.5                                   # alive
+            - 0.8 * abs(yaw_err)                    # heading discipline (don't curve)
+            - 0.8 * abs(lateral_vel)                # run18: 0.3->0.5, GENTLE drift trim (run16's 0.6+action-rate over-corrected to standing)
+            - 0.05 * np.sum(np.square(action))      # small residual penalty (action = residual)
+            # run18: action-rate penalty REMOVED — it was anti-motion (collapsed runs 16/17 to standing)
             - orientation_penalty
             - height_penalty
-            - lateral_penalty
-            - vertical_penalty
-            - smoothness_penalty
         )
 
+        # --- Gait-smoothness shaping (warm-start only; baseline reward unchanged) ---
+        if self._smooth:
+            foot_z = np.array([self.data.site_xpos[fid][2] for fid in self._foot_ids])  # LF,RF,LH,RH
+            down = foot_z < self.CONTACT_Z
+            # Phase-correct stance schedule (matches _scripted_trot_deg frames)
+            if np.sin(self._phase) >= 0:
+                stance = np.array([True, False, False, True])   # frame A: LF,RH down
+            else:
+                stance = np.array([False, True, True, False])   # frame B: RF,LH down
+            # Reward each foot matching its phase-correct contact state (centered at 2/4):
+            # pulls the held-up LH foot DOWN during its stance phase -> symmetric, smoother.
+            contact_reward = self._k_contact * (float(np.sum(down == stance)) - 2.0)
+            # Discourage air-pawing: penalize foot height above 40mm (LH lifts ~100mm).
+            overlift_penalty = self._k_overlift * float(np.sum(np.clip(foot_z - 0.040, 0.0, None)))
+            # Gentle jerk penalty on the residual (warm-start avoids the 16/17 collapse).
+            jerk_penalty = self._k_jerk * float(np.mean(np.square(action - self._last_action)))
+            reward += contact_reward - overlift_penalty - jerk_penalty
+            # Extra lateral trim to fix the under-DR crab (default 0 = run21 unchanged).
+            reward -= self._lat_extra * abs(lateral_vel)
+
         if terminated:
-            # -10 is far too cheap under gamma=0.99 (~100-step horizon): a 34-step forward
-            # dive discounts to ~+88 vs ~+59 for standing, so DIVING is optimal and PPO
-            # correctly finds it. Falling must price in the forfeited remaining episode.
-            reward -= float(os.environ.get("PIDOG_TERM_PENALTY", "10.0"))
+            reward -= 50.0
 
         return reward
 
@@ -206,9 +268,20 @@ class PiDogEnv(gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
 
+        # --- Domain randomization: perturb physics each episode for sim-to-real ---
+        if self._dr:
+            self.model.body_mass[:] = self._nominal_body_mass * self.np_random.uniform(0.80, 1.25)
+            self.model.geom_friction[:] = self._nominal_friction
+            self.model.geom_friction[:, 0] = self._nominal_friction[:, 0] * self.np_random.uniform(0.6, 1.4)
+            self._smooth_alpha = float(self.np_random.uniform(0.70, 0.88))  # servo-speed variation
+        else:
+            self._smooth_alpha = 0.8
+
         # Pre-set joints and height to avoid violent drop from 0.12m
         self.data.qpos[2] = 0.08
         self.data.qpos[7:15] = np.radians(STAND_DEG)
+        if self._dr:
+            self.data.qpos[7:15] += self.np_random.uniform(-0.05, 0.05, size=8)  # initial-pose jitter (rad)
         self.data.qvel[:] = 0.0
         self.data.ctrl[:] = np.radians(STAND_DEG)  # MuJoCo expects RADIANS
         self._last_ctrl_deg = STAND_DEG.copy()
@@ -218,6 +291,10 @@ class PiDogEnv(gym.Env):
             mujoco.mj_step(self.model, self.data)
 
         self._step_count = 0
+        self._phase = 0.0
+        # Capture the initial heading (yaw) so the reward can keep the trot pointed forward
+        q = self.data.qpos[3:7]
+        self._yaw0 = float(np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2)))
         self._last_action = np.zeros(8, dtype=np.float32)
         return self._get_obs(), {}
 
@@ -233,16 +310,23 @@ class PiDogEnv(gym.Env):
         action = np.asarray(action, dtype=np.float32)
         prev_action = self._last_action.copy()
 
-        target_ctrl_deg = STAND_DEG + action * ACTION_RANGE
+        # Residual control: scripted symmetric trot + small learned residual
+        target_ctrl_deg = self._scripted_trot_deg() + action * RESIDUAL_DEG
 
         # Exponential smoothing prevents sudden servo jumps (sim-to-real friendly)
-        ctrl_deg = 0.8 * self._last_ctrl_deg + 0.2 * target_ctrl_deg
+        a = self._smooth_alpha
+        ctrl_deg = a * self._last_ctrl_deg + (1 - a) * target_ctrl_deg
         self.data.ctrl[:] = np.radians(ctrl_deg)  # MuJoCo expects RADIANS
+
+        # DR: occasional random body shove (robustness to bumps / uneven floor)
+        if self._dr and self.np_random.random() < 0.01:
+            self.data.qvel[0:2] += self.np_random.uniform(-0.15, 0.15, size=2)
 
         for _ in range(self.n_substeps):
             mujoco.mj_step(self.model, self.data)
 
         self._step_count += 1
+        self._phase += self._phase_inc   # advance the gait clock
 
         obs = self._get_obs()
         terminated = self._is_terminated()
