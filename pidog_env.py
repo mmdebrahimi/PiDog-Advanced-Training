@@ -26,6 +26,7 @@ IMPORTANT: MuJoCo ctrl expects RADIANS at runtime, even when compiler angle="deg
 The degree setting only affects XML attribute parsing, not runtime ctrl values.
 """
 
+import math
 import os
 import numpy as np
 import gymnasium as gym
@@ -111,17 +112,28 @@ class PiDogEnv(gym.Env):
     def _compute_reward(self, action, terminated):
         """Compute shaped reward encouraging forward locomotion while staying upright.
 
-        Reward = 5x forward_vel + 1.0 alive - penalties - 10 on termination.
+        Reward = FORWARD_WEIGHT*forward_vel + ALIVE_BONUS - penalties - 10 on termination.
 
-        With working actuators (radians fix), this simple structure should work:
-        standing earns +1.0/step from alive bonus, walking earns +1.0 + velocity bonus.
+        NOTE (2026-07-09): the original comment claimed "standing earns +1.0/step from the
+        alive bonus, walking earns +1.0 + velocity bonus". That is FALSE -- walking also
+        incurs energy/smoothness/lateral/vertical penalties (dP ~ 0.2-0.4/step) that
+        standing does not. At the 500mm target speed (0.025 m/s) the old velocity term paid
+        only 5*0.025 = 0.125/step < dP, so STANDING STILL strictly dominated walking.
+        Confirmed empirically: a 1.5M-step run reached ep_rew_mean=586, ep_len_mean=1000,
+        forward=15.7mm. Raising ent_coef 0.01->0.05 (per train.py:64) did NOT help -- policy
+        std exploded to 18.1 and it fell at step 40. The barrier is the reward, not exploration.
+
+        Both terms are env-var tunable; the defaults reproduce the original reward exactly.
         """
+        forward_weight = float(os.environ.get("PIDOG_FORWARD_WEIGHT", "5.0"))
+        alive_bonus = float(os.environ.get("PIDOG_ALIVE_BONUS", "1.0"))
+
         forward_vel = self.data.qvel[0]
         lateral_vel = self.data.qvel[1]
         vertical_vel = self.data.qvel[2]
         torso_z = self.data.qpos[2]
 
-        alive = 1.0 if forward_vel > -0.01 else 0.0
+        alive = alive_bonus if forward_vel > -0.01 else 0.0
 
         energy_penalty = np.sum(np.square(action)) * 0.05
 
@@ -139,8 +151,21 @@ class PiDogEnv(gym.Env):
         # Penalize difference from previous action to encourage smooth gaits
         smoothness_penalty = np.sum(np.square(action - self._last_action)) * 0.1  # moderate: discourages vibration without blocking movement
 
+        # Reward mode. "linear" (default) reproduces the canonical W*v term, which has TWO
+        # degenerate optima: v=0 pays nothing but costs nothing (standing wins when dP >
+        # W*v), and larger v always pays more (diving wins under a short horizon). Both were
+        # observed across 6 runs. "target" makes both unreachable: payoff peaks at v_target
+        # and DECAYS on either side, so standing is near-worthless and diving buys nothing.
+        if os.environ.get("PIDOG_REWARD_MODE", "linear") == "target":
+            v_target = float(os.environ.get("PIDOG_VEL_TARGET", "0.15"))
+            v_sigma = float(os.environ.get("PIDOG_VEL_SIGMA", "0.10"))
+            v_weight = float(os.environ.get("PIDOG_VEL_WEIGHT", "3.0"))
+            forward_term = v_weight * math.exp(-((forward_vel - v_target) ** 2) / (v_sigma ** 2))
+        else:
+            forward_term = forward_weight * forward_vel
+
         reward = (
-            5.0 * forward_vel
+            forward_term
             + alive
             - energy_penalty
             - orientation_penalty
@@ -151,7 +176,10 @@ class PiDogEnv(gym.Env):
         )
 
         if terminated:
-            reward -= 10.0
+            # -10 is far too cheap under gamma=0.99 (~100-step horizon): a 34-step forward
+            # dive discounts to ~+88 vs ~+59 for standing, so DIVING is optimal and PPO
+            # correctly finds it. Falling must price in the forfeited remaining episode.
+            reward -= float(os.environ.get("PIDOG_TERM_PENALTY", "10.0"))
 
         return reward
 

@@ -1,0 +1,130 @@
+<mujoco model="pidog">
+  <compiler angle="degree" autolimits="true"/>
+
+  <option gravity="0 0 -9.81" timestep="0.002">
+    <flag contact="enable"/>
+  </option>
+
+  <default>
+    <joint damping="0.2" armature="0.01"/>
+    <geom friction="0.8 0.005 0.001" condim="3" conaffinity="1" contype="1"/>
+    <position kp="200" forcerange="-10 10"/>
+  </default>
+
+  <asset>
+    <texture type="2d" name="grid" builtin="checker" width="512" height="512"
+             rgb1="0.8 0.8 0.8" rgb2="0.6 0.6 0.6"/>
+    <material name="grid_mat" texture="grid" texrepeat="8 8"/>
+  </asset>
+
+  <worldbody>
+    <light diffuse="0.8 0.8 0.8" pos="0 0 2" dir="0 0 -1"/>
+    <light diffuse="0.3 0.3 0.3" pos="1 1 2" dir="-0.5 -0.5 -1"/>
+
+    <!-- Ground plane -->
+    <geom type="plane" size="2 2 0.01" material="grid_mat" conaffinity="1" contype="1"/>
+
+    <!-- ============ TORSO ============ -->
+    <!-- Body: 117mm long x 98mm wide x 25mm tall, ~300g estimated -->
+    <body name="torso" pos="0 0 0.12">
+      <freejoint name="root"/>
+      <geom name="torso_geom" type="box" size="0.049 0.0585 0.0125"
+            rgba="0.3 0.5 0.8 1" mass="0.3"/>
+
+      <!-- IMU sensor site (center of body) -->
+      <site name="imu" pos="0 0 0" size="0.005"/>
+
+      <!-- ============ LEFT FRONT LEG ============ -->
+      <!-- Hip at (-49mm, -58.5mm, 0) relative to body center -->
+      <body name="lf_hip" pos="-0.049 -0.0585 0">
+        <joint name="lf_hip_j" type="hinge" axis="1 0 0" range="-90 90"/>
+        <geom name="lf_upper" type="capsule" fromto="0 0 0 0 0 -0.042"
+              size="0.008" rgba="0.8 0.3 0.3 1" mass="0.02"/>
+
+        <body name="lf_knee" pos="0 0 -0.042">
+          <joint name="lf_knee_j" type="hinge" axis="1 0 0" range="-90 90"/>
+          <geom name="lf_lower" type="capsule" fromto="0 0 0 0 0 -0.076"
+                size="0.006" rgba="0.9 0.5 0.3 1" mass="0.015"/>
+          <!-- Foot contact point -->
+          <site name="lf_foot" pos="0 0 -0.076" size="0.01"/>
+        </body>
+      </body>
+
+      <!-- ============ RIGHT FRONT LEG ============ -->
+      <!-- Hip at (+49mm, -58.5mm, 0) — axis flipped for mirrored sign convention -->
+      <body name="rf_hip" pos="0.049 -0.0585 0">
+        <joint name="rf_hip_j" type="hinge" axis="-1 0 0" range="-90 90"/>
+        <geom name="rf_upper" type="capsule" fromto="0 0 0 0 0 -0.042"
+              size="0.008" rgba="0.8 0.3 0.3 1" mass="0.02"/>
+
+        <body name="rf_knee" pos="0 0 -0.042">
+          <joint name="rf_knee_j" type="hinge" axis="-1 0 0" range="-90 90"/>
+          <geom name="rf_lower" type="capsule" fromto="0 0 0 0 0 -0.076"
+                size="0.006" rgba="0.9 0.5 0.3 1" mass="0.015"/>
+          <site name="rf_foot" pos="0 0 -0.076" size="0.01"/>
+        </body>
+      </body>
+
+      <!-- ============ LEFT HIND LEG ============ -->
+      <!-- Hip at (-49mm, +58.5mm, 0) -->
+      <body name="lh_hip" pos="-0.049 0.0585 0">
+        <joint name="lh_hip_j" type="hinge" axis="1 0 0" range="-90 90"/>
+        <geom name="lh_upper" type="capsule" fromto="0 0 0 0 0 -0.042"
+              size="0.008" rgba="0.3 0.8 0.3 1" mass="0.02"/>
+
+        <body name="lh_knee" pos="0 0 -0.042">
+          <joint name="lh_knee_j" type="hinge" axis="1 0 0" range="-90 90"/>
+          <geom name="lh_lower" type="capsule" fromto="0 0 0 0 0 -0.076"
+                size="0.006" rgba="0.5 0.9 0.3 1" mass="0.015"/>
+          <site name="lh_foot" pos="0 0 -0.076" size="0.01"/>
+        </body>
+      </body>
+
+      <!-- ============ RIGHT HIND LEG ============ -->
+      <!-- Hip at (+49mm, +58.5mm, 0) — axis flipped for mirrored sign convention -->
+      <body name="rh_hip" pos="0.049 0.0585 0">
+        <joint name="rh_hip_j" type="hinge" axis="-1 0 0" range="-90 90"/>
+        <geom name="rh_upper" type="capsule" fromto="0 0 0 0 0 -0.042"
+              size="0.008" rgba="0.3 0.8 0.3 1" mass="0.02"/>
+
+        <body name="rh_knee" pos="0 0 -0.042">
+          <joint name="rh_knee_j" type="hinge" axis="-1 0 0" range="-90 90"/>
+          <geom name="rh_lower" type="capsule" fromto="0 0 0 0 0 -0.076"
+                size="0.006" rgba="0.5 0.9 0.3 1" mass="0.015"/>
+          <site name="rh_foot" pos="0 0 -0.076" size="0.01"/>
+        </body>
+      </body>
+
+    </body>
+  </worldbody>
+
+  <!-- ============ ACTUATORS ============ -->
+  <!-- Position servos: kp controls stiffness, forcerange limits torque -->
+  <actuator>
+    <!-- Leg actuators: mapped to PiDog indices -->
+    <!-- Index 0: LF upper (hip) -->
+    <position name="lf_hip_a"  joint="lf_hip_j"  ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 1: LF lower (knee) -->
+    <position name="lf_knee_a" joint="lf_knee_j" ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 2: RF upper (hip) -->
+    <position name="rf_hip_a"  joint="rf_hip_j"  ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 3: RF lower (knee) -->
+    <position name="rf_knee_a" joint="rf_knee_j" ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 4: LH upper (hip) -->
+    <position name="lh_hip_a"  joint="lh_hip_j"  ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 5: LH lower (knee) -->
+    <position name="lh_knee_a" joint="lh_knee_j" ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 6: RH upper (hip) -->
+    <position name="rh_hip_a"  joint="rh_hip_j"  ctrlrange="-80 80"  kp="200"/>
+    <!-- Index 7: RH lower (knee) -->
+    <position name="rh_knee_a" joint="rh_knee_j" ctrlrange="-80 80"  kp="200"/>
+  </actuator>
+
+  <!-- ============ SENSORS ============ -->
+  <sensor>
+    <accelerometer name="imu_acc" site="imu"/>
+    <gyro name="imu_gyro" site="imu"/>
+    <framequat name="torso_quat" objtype="body" objname="torso"/>
+    <framelinvel name="torso_vel" objtype="body" objname="torso"/>
+  </sensor>
+</mujoco>
