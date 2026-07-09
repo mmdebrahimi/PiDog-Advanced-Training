@@ -26,48 +26,49 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pidog.xml
 STAND = np.array([25, 35, -25, -35, 35, 35, -35, -35], dtype=np.float64)
 
 # Gait parameters (degrees)
-LIFT = 12
-SWING = 12
+LIFT = 30   # knee bend increase for swing phase (lifts foot off ground)
+SWING = 10  # hip forward/backward offset from STAND for swing/stance
 
 
 def pidog_to_mujoco_ctrl(angles_deg):
-    """Convert PiDog angle commands (degrees) to MuJoCo ctrl values (degrees).
+    """Convert PiDog angle commands (degrees) to MuJoCo ctrl values (radians).
 
-    MuJoCo position actuators with ctrlrange in degrees accept degree inputs directly.
-    The mapping is 1:1 since we defined the actuators to match PiDog ordering.
+    MuJoCo position actuators always use radians at runtime, regardless of the
+    compiler angle="degree" setting (which only affects XML attribute parsing).
     """
-    return np.array(angles_deg, dtype=np.float64)
+    return np.radians(np.array(angles_deg, dtype=np.float64))
 
 
 def make_gait_frames(stand, lift, swing):
-    """Same 4-frame diagonal trot as first_gait.py."""
-    s = stand.copy()
+    """Proper 2-phase diagonal trot with stance-push and swing phases.
 
-    f1 = s.copy()
-    f1[0] = s[0] - lift
-    f1[1] = s[1] - lift
-    f1[6] = s[6] + lift
-    f1[7] = s[7] + lift
+    Each frame defines a complete robot configuration:
+      - Stance legs: hip pushed backward (more than STAND), knee bent → foot planted, pushing
+      - Swing legs: hip pulled forward (less than STAND), knee straightened → foot in air
 
-    f2 = s.copy()
-    f2[0] = s[0] + swing
-    f2[6] = s[6] - swing
-    f2[2] = s[2] - swing
-    f2[4] = s[4] - swing
+    Diagonal pairs alternate: (LF+RH) and (RF+LH).
+    The asymmetry between stance (backward push) and swing (forward reposition)
+    creates net forward ground reaction force.
+    """
+    # Frame 1: Pair A (LF+RH) stance, Pair B (RF+LH) swing
+    # Stance: hip LESS backward (push body forward by extending), knee at STAND
+    # Swing: hip MORE backward (reposition behind), knee MORE bent (lift foot)
+    f1 = np.array([
+        stand[0] - swing, stand[1],            # LF: hip forward (stance push), knee normal
+        stand[2] - swing, stand[3] - lift,     # RF: hip backward (swing), knee MORE bent
+        stand[4] + swing, stand[5] + lift,     # LH: hip backward (swing), knee MORE bent
+        stand[6] + swing, stand[7],            # RH: hip forward (stance push), knee normal
+    ], dtype=np.float64)
 
-    f3 = s.copy()
-    f3[2] = s[2] + lift
-    f3[3] = s[3] + lift
-    f3[4] = s[4] - lift
-    f3[5] = s[5] - lift
+    # Frame 2: Pair B (RF+LH) stance, Pair A (LF+RH) swing
+    f2 = np.array([
+        stand[0] + swing, stand[1] + lift,     # LF: hip backward (swing), knee MORE bent
+        stand[2] + swing, stand[3],             # RF: hip forward (stance push), knee normal
+        stand[4] - swing, stand[5],             # LH: hip forward (stance push), knee normal
+        stand[6] - swing, stand[7] - lift,      # RH: hip backward (swing), knee MORE bent
+    ], dtype=np.float64)
 
-    f4 = s.copy()
-    f4[2] = s[2] - swing
-    f4[4] = s[4] + swing
-    f4[0] = s[0] - swing
-    f4[6] = s[6] + swing
-
-    return [f1, f2, f3, f4]
+    return [f1, f2]
 
 
 def run_simulation(cycles=4, render_video=True, output_path=None):
@@ -76,17 +77,20 @@ def run_simulation(cycles=4, render_video=True, output_path=None):
 
     # Control rate: update ctrl every 20ms (50Hz), sim steps at 2ms
     ctrl_substeps = 10  # 10 * 2ms = 20ms per control step
-    frame_hold_steps = 15  # hold each gait frame for 15 ctrl steps = 300ms
+    frame_hold_steps = 10  # hold each gait frame for 10 ctrl steps = 200ms
 
     frames_for_video = []
     renderer = None
     if render_video:
         renderer = mujoco.Renderer(model, height=480, width=640)
 
-    # Phase 1: Let robot settle for 0.5s with stand pose
+    # Phase 1: Let robot settle — pre-set joints to avoid violent drop
     print("Settling into stand pose...")
+    data.qpos[2] = 0.08  # start above final height
+    data.qpos[7:15] = np.radians(STAND)  # pre-set joint angles
+    data.qvel[:] = 0.0
     data.ctrl[:] = pidog_to_mujoco_ctrl(STAND)
-    for _ in range(250):  # 0.5s at 2ms timestep
+    for _ in range(500):  # 1.0s at 2ms timestep
         mujoco.mj_step(model, data)
 
     # Capture initial state

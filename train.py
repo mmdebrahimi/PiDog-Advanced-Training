@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 """Train PPO locomotion policy for PiDog in MuJoCo.
 
+Uses Stable Baselines3 PPO with 8 parallel MuJoCo environments.
+The policy network is a 256-128 MLP with Tanh activations for both
+actor and critic. CUDA is auto-detected for GPU training.
+
 Usage:
-    python3 train.py                         # Train 100k steps (quick test)
-    python3 train.py --timesteps=1000000    # Full training
-    python3 train.py --eval                 # Evaluate saved model
-    python3 train.py --render               # Render video of trained policy
+    python train.py                         # Train 100k steps (quick test)
+    python train.py --timesteps=3000000     # Full training run
+    python train.py --eval                  # Evaluate saved model (10 episodes)
+    python train.py --render                # Render video of trained policy
+
+Important: After editing pidog_env.py, delete __pycache__/ before training.
+SubprocVecEnv spawns separate processes that may load stale cached bytecode.
 """
 
 import argparse
 import os
 
+# Fix CUDA detection on Windows — must be set before torch import.
+# See: https://github.com/pytorch/pytorch/issues/... (cudaGetDeviceCount error)
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 import numpy as np
@@ -23,6 +32,7 @@ POLICY_PATH = os.path.join(MODEL_DIR, "pidog_policy")
 
 
 def make_env():
+    """Create a single PiDogEnv (used for eval/render in the main process)."""
     from pidog_env import PiDogEnv
     return PiDogEnv()
 
@@ -30,6 +40,7 @@ def make_env():
 from stable_baselines3.common.monitor import Monitor
 
 def make_env_fn():
+    """Factory for SubprocVecEnv — each subprocess gets its own Monitor-wrapped env."""
     def _init():
         from pidog_env import PiDogEnv
         env = PiDogEnv()
@@ -38,12 +49,23 @@ def make_env_fn():
 
 
 def linear_schedule(initial_value: float):
+    """Linear LR decay from initial_value → 0 over training. Currently unused."""
     def func(progress_remaining: float) -> float:
         return progress_remaining * initial_value
     return func
 
 
 def train(timesteps=100_000, save_path=POLICY_PATH):
+    """Train PPO policy with 8 parallel environments.
+
+    Key hyperparameters (tuned for quadruped locomotion):
+      - n_steps=1024: rollout buffer per env (8192 total samples per update)
+      - batch_size=256: minibatch size → 32 gradient steps per epoch
+      - ent_coef=0.05: high entropy bonus to prevent premature std collapse
+                       (without this, the policy converges to "stand still")
+      - learning_rate=3e-4: constant (linear decay caused policy to stop learning)
+      - net_arch=[256,128]: larger than default 64-64 for 27-dim obs + 8-dim action
+    """
     from stable_baselines3 import PPO
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -52,6 +74,7 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
     n_envs = 8
     env = SubprocVecEnv([make_env_fn() for _ in range(n_envs)])
 
+    # Separate actor/critic networks with Tanh (standard for locomotion)
     policy_kwargs = dict(
         net_arch=dict(pi=[256, 128], vf=[256, 128]),
         activation_fn=torch.nn.Tanh,
@@ -62,14 +85,14 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
         env,
         verbose=1,
         policy_kwargs=policy_kwargs,
-        n_steps=1024,
-        batch_size=256,
-        n_epochs=10,
-        learning_rate=3e-4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        ent_coef=0.05,
+        n_steps=1024,           # 1024 steps × 8 envs = 8192 samples per update
+        batch_size=256,         # 8192 / 256 = 32 minibatches per epoch
+        n_epochs=10,            # 10 passes over the rollout buffer
+        learning_rate=3e-4,     # constant LR (linear decay caused premature convergence)
+        gamma=0.99,             # discount factor
+        gae_lambda=0.95,        # GAE advantage estimation
+        clip_range=0.2,         # PPO clipping
+        ent_coef=0.01,          # moderate entropy for exploration
         device=device,
     )
 
@@ -83,6 +106,7 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
 
 
 def evaluate(model_path=POLICY_PATH, episodes=10):
+    """Run deterministic policy for N episodes and report metrics."""
     from stable_baselines3 import PPO
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -128,6 +152,7 @@ def evaluate(model_path=POLICY_PATH, episodes=10):
 
 
 def render_video(model_path=POLICY_PATH, output_path=None):
+    """Render trained policy to MP4 video (500 frames ≈ 10s at 50Hz control rate)."""
     from stable_baselines3 import PPO
     import mujoco
 
@@ -142,7 +167,7 @@ def render_video(model_path=POLICY_PATH, output_path=None):
     frames = []
 
     obs, _ = env.reset()
-    for _ in range(500):  # 10 seconds at 50Hz
+    for _ in range(500):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, _ = env.step(action)
 

@@ -103,21 +103,21 @@
   <actuator>
     <!-- Leg actuators: mapped to PiDog indices -->
     <!-- Index 0: LF upper (hip) -->
-    <position name="lf_hip_a"  joint="lf_hip_j"  ctrlrange="-60 60"  kp="200"/>
+    <position name="lf_hip_a"  joint="lf_hip_j"  ctrlrange="-80 80"  kp="200"/>
     <!-- Index 1: LF lower (knee) -->
-    <position name="lf_knee_a" joint="lf_knee_j" ctrlrange="-60 60"  kp="200"/>
+    <position name="lf_knee_a" joint="lf_knee_j" ctrlrange="-80 80"  kp="200"/>
     <!-- Index 2: RF upper (hip) -->
-    <position name="rf_hip_a"  joint="rf_hip_j"  ctrlrange="-60 60"  kp="200"/>
+    <position name="rf_hip_a"  joint="rf_hip_j"  ctrlrange="-80 80"  kp="200"/>
     <!-- Index 3: RF lower (knee) -->
-    <position name="rf_knee_a" joint="rf_knee_j" ctrlrange="-60 60"  kp="200"/>
+    <position name="rf_knee_a" joint="rf_knee_j" ctrlrange="-80 80"  kp="200"/>
     <!-- Index 4: LH upper (hip) -->
-    <position name="lh_hip_a"  joint="lh_hip_j"  ctrlrange="-60 60"  kp="200"/>
+    <position name="lh_hip_a"  joint="lh_hip_j"  ctrlrange="-80 80"  kp="200"/>
     <!-- Index 5: LH lower (knee) -->
-    <position name="lh_knee_a" joint="lh_knee_j" ctrlrange="-60 60"  kp="200"/>
+    <position name="lh_knee_a" joint="lh_knee_j" ctrlrange="-80 80"  kp="200"/>
     <!-- Index 6: RH upper (hip) -->
-    <position name="rh_hip_a"  joint="rh_hip_j"  ctrlrange="-60 60"  kp="200"/>
+    <position name="rh_hip_a"  joint="rh_hip_j"  ctrlrange="-80 80"  kp="200"/>
     <!-- Index 7: RH lower (knee) -->
-    <position name="rh_knee_a" joint="rh_knee_j" ctrlrange="-60 60"  kp="200"/>
+    <position name="rh_knee_a" joint="rh_knee_j" ctrlrange="-80 80"  kp="200"/>
   </actuator>
 
   <!-- ============ SENSORS ============ -->
