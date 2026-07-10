@@ -1,0 +1,3 @@
+# Test dependencies (the runtime deps are in requirements.txt).
+# Run: python -m pytest deploy/
+pytest>=7.0
