@@ -36,6 +36,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)   # pidog_env.py (canonical 29-dim residual env)
 sys.path.insert(0, HERE)   # deploy_pidog.py
 
+import pidog_env                        # noqa: E402
 from pidog_env import PiDogEnv          # noqa: E402
 import deploy_pidog                     # noqa: E402
 
@@ -117,3 +118,21 @@ def test_obs_dim_is_29_residual_env():
         f"expected 29-dim residual obs, got {env.observation_space.shape} "
         "-- did the direct-control env leak back to the root?"
     )
+
+
+def test_deploy_scripted_base_gait_matches_env():
+    """The base gait the residual policy rides on is duplicated: env._scripted_trot_deg()
+    and deploy_pidog.scripted_trot_deg(). They MUST stay identical -- if either drifts, the
+    deployed policy operates around a different base pose than it trained on. Also pins the
+    three gait constants (a mismatch there is the same failure by another route)."""
+    for c in ("GAIT_LIFT", "GAIT_SWING", "RESIDUAL_DEG"):
+        assert getattr(pidog_env, c) == getattr(deploy_pidog, c), f"{c} differs env vs deploy"
+
+    env = PiDogEnv()
+    max_err = 0.0
+    for phase in np.linspace(0, 4 * np.pi, 400):
+        env._phase = phase
+        env_base = np.asarray(env._scripted_trot_deg(), float)
+        dep_base = np.asarray(deploy_pidog.scripted_trot_deg(phase), float)
+        max_err = max(max_err, float(np.max(np.abs(env_base - dep_base))))
+    assert max_err < 1e-9, f"deploy scripted base gait drifted from env by {max_err:.2e}"
