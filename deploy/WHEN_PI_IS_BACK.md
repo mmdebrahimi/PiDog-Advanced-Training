@@ -49,7 +49,11 @@ cd ~/pidog_deploy_v3 && bash run.sh    # or: python deploy_pidog.py --stand   (v
 ```
 Deploy candidates (in `deploy/`):
 - `policy_straight_trot.npz` = **run18** (best clean trot, 466mm) — start here for a flat floor.
-- run19 (DR-robust) / run21 (smoothness, training now) — extract + stage when ready via
+- `policy_dr_robust.npz` = **run19 (domain-randomized)** — 330mm fwd / 252mm lat in sim,
+  SLOWER than run18 but DR-trained for sim->real transfer. **Recommended for the FIRST
+  hardware attempt** (a sim-overfit fast policy risks thrashing servos); switch to
+  `policy_straight_trot.npz` (run18, 473mm) once the gait is confirmed stable on the floor.
+- run21 (smoothness) — extract + stage when ready via
   `extract_weights.py` if you want the sim-to-real-hardened gait.
 Deploy details: **`PI_DEPLOY_INSTRUCTIONS.md`** + **`DEPLOY_AND_RETRIEVE.md`**.
 ⚠ `deploy_pidog.py` clips action to [-1,1] and matches sim RESIDUAL_DEG/gait-freq — do not edit those without re-extracting.
