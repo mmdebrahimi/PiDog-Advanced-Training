@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# NOT THE CANONICAL ENV. This copy has a 24-dim observation and NO scripted base gait.
+# The canonical training env is the repo-root `pidog_env.py`: 29-dim obs, policy emits a small
+# RESIDUAL on a known-symmetric scripted diagonal trot. Policies trained against it pass
+# `eval_mvp.py` (run15: 432 mm forward, 1000 steps).
+#
+# A sibling 27-dim direct-control env was benchmarked on 2026-07-09: 8 PPO configurations, none
+# exceeded ~15 mm forward (standing) or survived a forward dive past step ~35. THIS file has not
+# itself been benchmarked -- it is flagged, not condemned. Prefer the root env; if you must use
+# this one, gate it with `eval_mvp.py` before believing any result.
+
 """Gymnasium environment for PiDog locomotion in MuJoCo.
 
 Observation (24-dim):

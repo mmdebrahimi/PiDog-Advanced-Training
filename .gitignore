@@ -47,3 +47,12 @@ logs/
 
 # Temp
 tmp/
+checkpoints/
+*.zip
+train_*.log
+sim_trot.mp4
+pidog_policy*
+
+# Deployable policies are the project's only working artifact -- 168KB each, and they
+# existed ONLY on a removable drive until 2026-07-09. Exempt them from the *.npz rule.
+!deploy/policy_*.npz

@@ -1,0 +1,3 @@
+# Trained policy weights: never apply text/EOL filters (silent corruption).
+*.npz binary
+*.zip binary

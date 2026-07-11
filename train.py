@@ -71,7 +71,7 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    n_envs = 8
+    n_envs = 4
     env = SubprocVecEnv([make_env_fn() for _ in range(n_envs)])
 
     # Separate actor/critic networks with Tanh (standard for locomotion)
@@ -92,12 +92,22 @@ def train(timesteps=100_000, save_path=POLICY_PATH):
         gamma=0.99,             # discount factor
         gae_lambda=0.95,        # GAE advantage estimation
         clip_range=0.2,         # PPO clipping
-        ent_coef=0.01,          # moderate entropy for exploration
+        ent_coef=0.02,          # run11: lower for from-scratch stability with stance penalty
         device=device,
     )
 
+    # Checkpoint every 250k total steps so a long CPU run survives a crash
+    from stable_baselines3.common.callbacks import CheckpointCallback
+    ckpt_dir = os.path.join(MODEL_DIR, "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    checkpoint_cb = CheckpointCallback(
+        save_freq=max(250_000 // n_envs, 1),
+        save_path=ckpt_dir,
+        name_prefix="pidog",
+    )
+
     print(f"Training PPO for {timesteps} timesteps with {n_envs} parallel envs...")
-    model.learn(total_timesteps=timesteps)
+    model.learn(total_timesteps=timesteps, callback=checkpoint_cb)
     model.save(save_path)
     print(f"Model saved to {save_path}")
 
