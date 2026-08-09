@@ -105,10 +105,23 @@ and call the shutdown tool. This fully stops the program."""
         print(f"  Actions: {actions}")
         dog.do_actions(actions)
 
+    # --- Speaker mute/unmute to suppress HAT amp idle hiss ---
+    HAT_SINK = "alsa_output.platform-soc_sound.stereo-fallback"
+
+    def _unmute_speaker():
+        subprocess.run(['pactl', 'set-sink-mute', HAT_SINK, '0'],
+                       capture_output=True, timeout=2)
+
+    def _mute_speaker():
+        subprocess.run(['pactl', 'set-sink-mute', HAT_SINK, '1'],
+                       capture_output=True, timeout=2)
+
     def on_speaking_start():
+        _unmute_speaker()
         dog.speaking()
 
     def on_speaking_end():
+        _mute_speaker()
         engine.restore_leds()
 
     def on_user_transcript(text):
@@ -233,21 +246,31 @@ and call the shutdown tool. This fully stops the program."""
     signal.signal(signal.SIGTERM, signal_handler)
     voice.on_shutdown(lambda: signal_handler(None, None))
 
-    # --- Auto-detect Bluetooth speaker, fall back to HDMI ---
+    # --- Auto-detect speaker: BT > HAT wired > HDMI ---
     try:
         r = subprocess.run(['pactl', 'list', 'sinks', 'short'],
                           capture_output=True, text=True, timeout=5)
         bt_sink = None
+        hat_sink = None
         for line in r.stdout.strip().splitlines():
+            sink_name = line.split('\t')[1] if '\t' in line else ""
             if 'bluez' in line.lower() or 'bluetooth' in line.lower():
-                bt_sink = line.split('\t')[1]
-                break
+                bt_sink = sink_name
+            elif 'soc_sound' in sink_name:
+                hat_sink = sink_name
         if bt_sink:
             subprocess.run(['pactl', 'set-default-sink', bt_sink],
                           capture_output=True, timeout=5)
             print(f"Audio: Bluetooth speaker ({bt_sink})")
+        elif hat_sink:
+            subprocess.run(['pactl', 'set-default-sink', hat_sink],
+                          capture_output=True, timeout=5)
+            # Start muted to suppress amp idle hiss
+            subprocess.run(['pactl', 'set-sink-mute', hat_sink, '1'],
+                          capture_output=True, timeout=5)
+            print(f"Audio: HAT wired speaker ({hat_sink}) — muted until speaking")
         else:
-            print("Audio: HDMI (no Bluetooth speaker detected)")
+            print("Audio: HDMI (no BT or HAT speaker detected)")
     except Exception:
         print("Audio: default sink (pactl unavailable)")
 
