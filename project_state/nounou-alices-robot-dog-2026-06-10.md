@@ -73,6 +73,8 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 | 4 | Behavior engine coordinates 5 behavior states correctly | implemented 2026-06-10 | medium | 2026-06-10 |
 | 5 | MuJoCo simulation runs scripted trot successfully | tested 2026-04-03 | high | 2026-04-03 |
 | 6 | CSI ribbon cable disconnects during head movement | observed 2026-06-10 | high | 2026-06-10 |
+| 7 | Back-left knee servo (pin 1) faulty: consistent ~20-30 deg wrong settle position + hunting oscillation; repeatability test 3x confirmed 2026-08-10; battery ruled out (8.40V full) | isolation tests 2026-08-10 | high | 2026-08-10 |
+| 8 | Back-left knee servo runs HOT + shows hysteresis (accurate only at 0, wrong at all other angles, direction-dependent) — software remap ruled out; physical replacement required | delta sweep + touch test 2026-08-10 | high | 2026-08-10 |
 <!-- project-state:end:evidence -->
 
 ### Unknowns
@@ -176,6 +178,7 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 | 17 | 2026-08-10 | run-tests | Servo horn recalibration: zero-hold tool + IMU auto-level (non-convergent) + discovered SunFounder 90-degree L calibration convention; thighs straight + shins L re-mounted; leg offsets zeroed in pidog.conf | in progress — back-left leg still extends irregularly at stand |
 | 18 | 2026-08-10 | ask-user | /project-state --resolve-pending-decision | Pending Decisions row 1: Wired speaker soldered to Robot HAT chosen instead of Bluetooth — audio confirmed working 2026-08-09 |
 | 19 | 2026-08-10 | propose | /project-state --refresh-frame | current-state: Companion 90% complete; wired HAT speaker working + shutdown voice cmd shipped; Pi board repositioned but CSI camera now undetected; servo-horn recalibration mid-flight; RL track still stalled |
+| 20 | 2026-08-10 | run-tests | Servo isolation tests: hip/knee per-servo moves + 3x knee repeatability cycle + battery voltage check | back-left knee servo (pin 1) confirmed faulty — consistent wrong settle + hunting; battery full 8.40V |
 <!-- project-state:end:action-log -->
 
 ## Open Questions for User

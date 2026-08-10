@@ -37,7 +37,7 @@
 - [ ] Enroll Alice's face and test first full interaction
 - [x] Reposition Pi board so CSI port faces head
 - [ ] Re-seat CSI camera cable (undetected since board repositioning 2026-08-10)
-- [ ] Finish leg horn recalibration: back-left leg extends irregularly at stand (thighs straight + shins L done; verify back-left shin mirror vs back-right)
+- [ ] Replace back-left knee servo (pin 1) — CONFIRMED faulty 2026-08-10 (worn pot: consistent wrong settle + hunting; battery ruled out). Swap with tail servo or use kit spare, then re-zero horn
 - [ ] Head yaw servo hunting (oscillates on disturbance) — check neck horn screw, else swap-test servo
 - [x] Tune head tracking smoothness (coast 15, sweep 8s, alpha 0.3, face lost 4s)
 - [x] Vision pipeline: YuNet-first detection, MOSSE inter-frame tracker, dead zone
