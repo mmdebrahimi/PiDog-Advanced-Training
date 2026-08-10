@@ -33,10 +33,12 @@
 - [x] HeadEstimator aims above bbox to tilt camera up toward face
 - [ ] Wake-from-sleep voice: depends on Realtime API still transcribing during sleep
 - [ ] Verify long-term memory persistence across sessions
-- [ ] I2S speaker/mic confirmed not working — add Bluetooth speaker
+- [x] I2S speaker fixed 2026-08-09: larger wired speaker on Robot HAT works (mute-between-speech suppresses amp hiss)
 - [ ] Enroll Alice's face and test first full interaction
-- [ ] Add Bluetooth speaker for audio from the dog itself
 - [x] Reposition Pi board so CSI port faces head
+- [ ] Re-seat CSI camera cable (undetected since board repositioning 2026-08-10)
+- [ ] Finish leg horn recalibration: back-left leg extends irregularly at stand (thighs straight + shins L done; verify back-left shin mirror vs back-right)
+- [ ] Head yaw servo hunting (oscillates on disturbance) — check neck horn screw, else swap-test servo
 - [x] Tune head tracking smoothness (coast 15, sweep 8s, alpha 0.3, face lost 4s)
 - [x] Vision pipeline: YuNet-first detection, MOSSE inter-frame tracker, dead zone
 - [x] Smart arrivals: identity-aware GREET (Alice/family/known/stranger)
@@ -44,7 +46,7 @@
 - [x] Shutdown voice command
 - [x] BT speaker auto-detect at startup
 - [x] API cost monitoring (session duration logging)
-- [ ] Get speaker (3.5mm or BT) and test audio from the dog
+- [x] Get speaker and test audio from the dog (wired HAT speaker, 2026-08-09)
 - [ ] Enroll Alice's face and run first interaction test
 - [x] Implement Behavior Engine (plan at `plans/Behavior_Engine_Plan.md`)
 

@@ -101,12 +101,13 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 | LED ownership: engine=ambient, voice=transient | 2026-06-10 | Eliminates 4-owner LED chaos |
 | MuJoCo over Isaac Sim for simulation | 2026-04-02 | CPU-only, runs on Pi 4, better Python API |
 | Alice's reaction IS the roadmap for Tier 2 features | 2026-06-10 | Don't build in a vacuum for a 7-year-old |
+| Resolved Pending Decision row 1: Wired speaker soldered to Robot HAT chosen instead of Bluetooth — larger speaker replaced stock unit, audio confirmed working 2026-08-09; amp idle hiss mitigated by mute-between-speech | 2026-08-10 | Auto-linked by /project-state --resolve-pending-decision (v0.2). Original decision text preserved at Pending Decisions row 1 with RESOLVED prefix. |
 <!-- project-state:end:decisions-made -->
 
 ### Pending Decisions
 | Decision | Proposer | Blocker | Notes |
 |---|---|---|---|
-| Which BT speaker to use | user | hardware purchase | Needs decent audio quality + portability |
+| RESOLVED 2026-08-10: Which BT speaker to use | user | hardware purchase | Needs decent audio quality + portability |
 | When to resume RL training on laptop | user | laptop availability | Parallel track, not blocking companion |
 <!-- project-state:end:pending-decisions -->
 
@@ -115,7 +116,7 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 Per D5: surfaces the Bellman cognitive frame at the architecture level. v0.1 populates this at init; v0.2's `/project-step` reads from it to decide next actions. v0.1 does NOT iterate over the frame — it sets it up.
 
 ### Current state (one-line summary)
-Companion system 85% complete (voice + tracking + personality + behavior engine); blocked on Pi board repositioning + BT speaker; RL track stalled on laptop GPU training.
+Companion 90% complete; wired HAT speaker working + shutdown voice cmd shipped; Pi board repositioned but CSI camera now undetected; servo-horn recalibration mid-flight (back-left leg extends irregularly at stand, head yaw servo hunting); RL track still stalled on laptop.
 
 ### Target state / terminal condition
 Alice has a sustained daily interaction with Nounou — she talks to him, he recognizes her, follows her smoothly, expresses personality, remembers their history, and eventually walks to her.
@@ -168,6 +169,13 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 | 10 | 2026-06-10 | edit-local-code | Memory v2 Step 3: Combined shutdown extraction — single API call for facts + session + people + topics | complete |
 | 11 | 2026-06-10 | edit-local-code | Memory v2 Step 4: MemoryCompiler — injects semantic + episodic context per visible person | complete |
 | 12 | 2026-06-10 | edit-local-code | Memory v2 Step 5: companion.py wiring — init + shutdown + fallback to legacy | complete |
+| 13 | 2026-08-10 | edit-local-code | Shutdown voice command: SHUTDOWN_TOOL in realtime_voice.py + on_shutdown wiring to graceful shutdown in companion.py | complete — "shutdown"/"power off" triggers full save + exit |
+| 14 | 2026-08-10 | edit-local-code | Wired HAT speaker support: sink priority BT > soc_sound > HDMI + mute-between-speech to suppress amp idle hiss | complete — audio confirmed audible from dog |
+| 15 | 2026-08-10 | edit-local-code | Camera graceful degradation: threaded capture timeout in FaceFollower.start() — companion runs voice-only when CSI cable fails | complete — tested against real cable failure |
+| 16 | 2026-08-10 | edit-local-code | Safe-actions expansion in dog_behavior.py: added waiting/twist body/doze off/feet shake, removed orphaned head down — all 30 ActionFlow actions now reachable | complete |
+| 17 | 2026-08-10 | run-tests | Servo horn recalibration: zero-hold tool + IMU auto-level (non-convergent) + discovered SunFounder 90-degree L calibration convention; thighs straight + shins L re-mounted; leg offsets zeroed in pidog.conf | in progress — back-left leg still extends irregularly at stand |
+| 18 | 2026-08-10 | ask-user | /project-state --resolve-pending-decision | Pending Decisions row 1: Wired speaker soldered to Robot HAT chosen instead of Bluetooth — audio confirmed working 2026-08-09 |
+| 19 | 2026-08-10 | propose | /project-state --refresh-frame | current-state: Companion 90% complete; wired HAT speaker working + shutdown voice cmd shipped; Pi board repositioned but CSI camera now undetected; servo-horn recalibration mid-flight; RL track still stalled |
 <!-- project-state:end:action-log -->
 
 ## Open Questions for User
