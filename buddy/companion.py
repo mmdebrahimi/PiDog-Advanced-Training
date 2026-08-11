@@ -107,13 +107,18 @@ and call the shutdown tool. This fully stops the program."""
 
     # --- Speaker mute/unmute to suppress HAT amp idle hiss ---
     HAT_SINK = "alsa_output.platform-soc_sound.stereo-fallback"
+    SPK_EN_GPIO = "12"  # robot HAT v5 amp enable; HAT pulls high, so hold low when silent
 
     def _unmute_speaker():
+        subprocess.run(['pinctrl', 'set', SPK_EN_GPIO, 'op', 'dh'],
+                       capture_output=True, timeout=2)
         subprocess.run(['pactl', 'set-sink-mute', HAT_SINK, '0'],
                        capture_output=True, timeout=2)
 
     def _mute_speaker():
         subprocess.run(['pactl', 'set-sink-mute', HAT_SINK, '1'],
+                       capture_output=True, timeout=2)
+        subprocess.run(['pinctrl', 'set', SPK_EN_GPIO, 'op', 'dl'],
                        capture_output=True, timeout=2)
 
     def on_speaking_start():
