@@ -35,3 +35,12 @@ All code committed via auto-save cron. Plans archived to `executed_plans/`.
 - Fix: user systemd service `~/.config/systemd/user/hat-speaker-mute.service` — waits for PipeWire, mutes any `alsa_output.*soc_sound*` sink (30s retry, pattern-matched so card renames survive). Enabled + verified (exit 0, sink muted).
 - `loginctl enable-linger pidog` so the user session (and the mute) starts at boot, not at desktop login.
 - Companion speech unmute/mute logic unchanged — it still unmutes only while speaking.
+
+## 2026-08-11 — Back-left leg root cause FOUND: direction inversion
+
+- User hypothesis confirmed by flip test: back-left leg (idx4 hip pin0, idx5 knee pin1) runs DIRECTION-INVERTED vs stock convention. Zero pose can't reveal it (90-degree L looks identical mirrored) — that's why zero always looked perfect while every pose was wrong.
+- Permanent fix: `leg_directions = [1,1,1,1,-1,-1,1,1]` passed to Robot() in pidog.py (source + site-packages deployed).
+- IMPORTANT: direction flip also reverses OFFSET effect on that leg — offset tweaks on idx4/5 act backwards vs other legs.
+- Sit verified good by user with runtime offsets: knee idx5 -30, hip idx4 0, tail -45 (tail = swapped-in servo, horn mounted ~45 deg off). NOT yet persisted to pidog.conf.
+- Open: close()/stop_and_lie slams lie pose at speed 85 — end-of-run pose shows thigh ~90 deg to ground on back-left; slow-vs-fast A/B run done, user observation pending.
+- Speaker buzz truly fixed: GPIO12 (HAT v5 amp enable) held low at boot by hat-speaker-mute.service; companion toggles it around speech.

@@ -180,6 +180,7 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 | 19 | 2026-08-10 | propose | /project-state --refresh-frame | current-state: Companion 90% complete; wired HAT speaker working + shutdown voice cmd shipped; Pi board repositioned but CSI camera now undetected; servo-horn recalibration mid-flight; RL track still stalled |
 | 20 | 2026-08-10 | run-tests | Servo isolation tests: hip/knee per-servo moves + 3x knee repeatability cycle + battery voltage check | back-left knee servo (pin 1) confirmed faulty — consistent wrong settle + hunting; battery full 8.40V |
 | 21 | 2026-08-11 | edit-local-code | Permanent boot-time HAT speaker mute: user systemd service hat-speaker-mute.service mutes soc_sound PipeWire sink at every boot (30s retry, pattern-matched sink name) + loginctl linger enabled so it fires at boot not desktop login | complete — service verified exit 0, sink muted; companion speech unmute unchanged |
+| 22 | 2026-08-11 | edit-local-code | ROOT CAUSE: back-left leg (idx4/idx5) direction-inverted vs stock convention (zero pose cannot reveal it — mirrored L looks identical); leg_directions [1,1,1,1,-1,-1,1,1] baked into pidog.py + deployed; user-confirmed sit near-perfect with runtime offsets knee -30 / tail -45 | sit VERIFIED by user; offsets not yet persisted to pidog.conf; close() speed-85 lie slam end-pose anomaly open |
 <!-- project-state:end:action-log -->
 
 ## Open Questions for User
