@@ -59,6 +59,7 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - **List known faces:** `python3 -m buddy.face_id --list`
 - Audio: sounddevice through PulseAudio (auto-detected pulse device) → HDMI output
 - Set HDMI as default: `pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo`
+- HAT speaker anti-buzz: `~/.config/systemd/user/hat-speaker-mute.service` mutes the soc_sound sink at every boot (linger enabled); companion unmutes only while speaking
 - Config files: `~/.config/pidog/names.json`, `openai_key`, `pidog-longterm-memory.md`, `known_faces.json`, `social_graph.json`, `personality.json`
 - Safe mode ON by default (no walking — desk safe). Use `--no-safe` for floor testing.
 - Always clear cache after edits: `find ~/pidog_lab/buddy -name "__pycache__" -exec rm -rf {} +`

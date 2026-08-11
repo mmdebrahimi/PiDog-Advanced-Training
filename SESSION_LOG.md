@@ -28,3 +28,10 @@ CSI cable keeps disconnecting. User plans to reposition Pi board so CSI port fac
 
 ### Git status
 All code committed via auto-save cron. Plans archived to `executed_plans/`.
+
+## 2026-08-11 — Permanent boot-time speaker mute (anti-buzz)
+
+- Buzz on every restart = HAT I2S amp sink (card 3, googlevoicehat/MAX98357A) coming up unmuted before companion.py runs.
+- Fix: user systemd service `~/.config/systemd/user/hat-speaker-mute.service` — waits for PipeWire, mutes any `alsa_output.*soc_sound*` sink (30s retry, pattern-matched so card renames survive). Enabled + verified (exit 0, sink muted).
+- `loginctl enable-linger pidog` so the user session (and the mute) starts at boot, not at desktop login.
+- Companion speech unmute/mute logic unchanged — it still unmutes only while speaking.
