@@ -44,3 +44,10 @@ All code committed via auto-save cron. Plans archived to `executed_plans/`.
 - Sit verified good by user with runtime offsets: knee idx5 -30, hip idx4 0, tail -45 (tail = swapped-in servo, horn mounted ~45 deg off). NOT yet persisted to pidog.conf.
 - Open: close()/stop_and_lie slams lie pose at speed 85 — end-of-run pose shows thigh ~90 deg to ground on back-left; slow-vs-fast A/B run done, user observation pending.
 - Speaker buzz truly fixed: GPIO12 (HAT v5 amp enable) held low at boot by hat-speaker-mute.service; companion toggles it around speech.
+
+## 2026-08-20 — Buzz recurrence after HAT power-cycle: resolved
+
+- HAT power-cycle brought the buzz back DESPITE GPIO12 low + sink muted. Amp-pin toggles had no audible effect this time; buzz correlated with Pi activity (static blip on message send).
+- Cleared after stacking: MCU reset + GPIO12 low + GPIO20 low (robot_hat detects HAT as v4 → spk_en=20) + sink muted. Exact lever ambiguous — boot service now applies ALL pins (12 + 20) + mute.
+- companion.py signal_handler now calls _mute_speaker() first on any shutdown, so a crash mid-speech can't leave the sink unmuted.
+- WATCH: if buzz returns after next HAT power-cycle, re-run the pin-toggle discrimination; wiring splice (bridge-tied amp output vs ground) still a suspect if load-correlated static reappears.

@@ -184,6 +184,10 @@ and call the shutdown tool. This fully stops the program."""
         _shutting_down = True
         print("\nShutting down... (press Ctrl+C again to force quit)")
         try:
+            _mute_speaker()  # amp off + sink muted no matter where speech was
+        except Exception:
+            pass
+        try:
             tracker.close()
         except Exception:
             pass
