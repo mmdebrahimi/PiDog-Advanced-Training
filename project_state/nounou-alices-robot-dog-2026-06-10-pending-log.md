@@ -1,0 +1,1 @@
+- PD-2 → defer: laptop still unavailable; robot hardware debugging active takes priority
