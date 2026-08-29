@@ -51,3 +51,11 @@ All code committed via auto-save cron. Plans archived to `executed_plans/`.
 - Cleared after stacking: MCU reset + GPIO12 low + GPIO20 low (robot_hat detects HAT as v4 → spk_en=20) + sink muted. Exact lever ambiguous — boot service now applies ALL pins (12 + 20) + mute.
 - companion.py signal_handler now calls _mute_speaker() first on any shutdown, so a crash mid-speech can't leave the sink unmuted.
 - WATCH: if buzz returns after next HAT power-cycle, re-run the pin-toggle discrimination; wiring splice (bridge-tied amp output vs ground) still a suspect if load-correlated static reappears.
+
+## 2026-08-29 — Back-left HIP servo (pin 0) convicted by raw repeatability test
+
+- Sit regression (same byte-identical software as Aug 11 known-good) traced to hardware: raw Servo('P0') test, NO pidog stack, 3 identical 0/+45/0/-45/0 cycles with webcam capture each position.
+- Pixel-diff evidence: 45-deg swing = ~6.8% frame change; commanded-zero drifted 6.9% -> 14.4% -> 15.6% across cycles (more than a full swing), monotonic, always rearward. Adjacent zeros differ 0.3% — stable until next excursion, then ratchets. Frames: captures/raw_c*_z*.jpg.
+- Servo in this slot = the ex-TAIL servo (swapped during knee repair). Verdict: horn slipping on spline OR internal gear slip. Horn-screw check pending; if tight -> servo dead, replacement needed (2 dead servos total now: tail + back-left hip).
+- Known-good sit recipe recorded at captures/known_good_sit.json (directions/offsets/angles) — diff against live state to detect future regressions.
+- P0 held at zero via background process for horn tightening.
