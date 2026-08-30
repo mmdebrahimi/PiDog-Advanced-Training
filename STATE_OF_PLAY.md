@@ -43,11 +43,12 @@ re-deriving anything:
 - `stop_and_lie` speed patched 85→30 (gentle shutdown slam)
 
 ## Faults OPEN (2026-08-29)
-1. **Back-left HIP servo (pin 0) slips under load** — convicted by raw repeatability
-   test (bare `Servo('P0')`, 3× 0/+45/0/-45/0, webcam pixel-diff): commanded-zero
-   drifted 6.9→14.4→15.6% frame-change (a real 45° swing = 6.8%), monotonic rearward
-   ratchet. Below ALL software. This is why the good sit "regressed".
-   Next: horn-screw check/tighten (hold P0 at zero first!), else replace servo.
+1. **Back-left HIP servo (pin 0) is DEAD — fully decoupled.** Progression on
+   2026-08-29: ratcheting drift under load (morning) → 15° dead arc loaded, 0.00%
+   response → by evening a 160° raw sweep (±80) moves the thigh ZERO even unloaded
+   on the pedestal, while a P1 knee control test visibly moves the leg (camera
+   method validated). Gear/spline stripped smooth. NO software remedy exists —
+   offsets measured physically ignored. ONLY fix: replace the servo.
 2. **Replacements needed: 2 servos** (back-left hip + tail slot). Purchase = user
    decision, not yet placed.
 3. **Head yaw servo hunts** (fast left-right shake on body movement) — unresolved;
