@@ -3,7 +3,7 @@
 ## CRITICAL: Session Persistence
 Sessions are lost on every Pi restart. The Pi restarts frequently.
 
-**On session START:** Read `SESSION_LOG.md` first — it has what happened last time.
+**On session START:** Read `STATE_OF_PLAY.md` FIRST (consolidated current state — hardware truths, known-good calibration, open faults, next steps), then `SESSION_LOG.md` for chronology. Keep STATE_OF_PLAY.md updated whenever a fact in it changes.
 
 **DURING session:** After every significant change:
 1. Update `SESSION_LOG.md` with what was just done
