@@ -62,12 +62,13 @@ re-deriving anything:
   GPIO 12 AND 20 low + mutes `alsa_output.platform-soc_sound.stereo-fallback`.
 - companion.py: unmutes amp+sink only while speaking; `signal_handler` re-mutes on
   ANY exit (a crash mid-speech once left it unmuted overnight).
-- CONFIRMED LIMIT (2026-08-29): on a charger supply the buzz persists with amp pins
-  low + sink muted + servo PWM stopped + MCU reset — i.e. it is charger switching
-  noise coupling into the speaker WIRING, unreachable by software. Fixes are
-  physical only: battery pack (quiet at 8.4V), re-solder/insulate the speaker
-  splice (bridge-tied amp — neither wire may touch ground/shield), or ferrite on
-  the charger lead. Do NOT re-attempt software fixes for charger-buzz.
+- FINAL VERDICT (2026-08-29): buzz = the HAT amp's intrinsic NOISE FLOOR through the
+  user's bigger/more-sensitive replacement speaker. Confirmed cone-sourced while amp
+  pins low + sink muted + PWM stopped + on battery — the amp stage is effectively
+  always live; no software sits between its noise and the cone. GPIO12/20 "fixes"
+  were coincidental. Do NOT re-attempt software fixes. Remedies: unplug speaker plug
+  at HAT socket (bench), series resistor 10-22R in one lead (attenuate), or BT
+  speaker (recommended — companion already prefers BT sink; original plan anyway).
 
 ## Debug method that WORKS here (learned the hard way)
 - ONE variable per run; user judges pose (their eye > camera for pose quality; my
