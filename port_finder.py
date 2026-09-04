@@ -8,14 +8,18 @@ print("Port finder: type 0-11 and press Enter -> that port wiggles (+15, -15, ba
 print("Repeat a number as often as you like. Type q to quit.\n")
 
 while True:
-    s = input("Port (0-11, q=quit): ").strip().lower()
+    s = input("Port (0-11, optional amplitude e.g. '3 45', q=quit): ").strip().lower()
     if s == "q":
         break
-    if not s.isdigit() or not (0 <= int(s) <= 11):
+    parts = s.split()
+    if not parts or not parts[0].isdigit() or not (0 <= int(parts[0]) <= 11):
         print("  need a number 0-11")
         continue
-    sv = Servo(f"P{s}")
-    for a in (0, 15, -15, 0):
+    amp = 15
+    if len(parts) > 1 and parts[1].lstrip("-").isdigit():
+        amp = min(abs(int(parts[1])), 60)
+    sv = Servo(f"P{parts[0]}")
+    for a in (0, amp, -amp, 0):
         sv.angle(a)
-        sleep(0.6)
-    print(f"  P{s} done — which part moved?")
+        sleep(1.0)
+    print(f"  P{parts[0]} done (±{amp}) — which part moved?")
