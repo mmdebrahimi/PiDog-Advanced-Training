@@ -10,6 +10,12 @@ Companion robot dog for Alice (7). Software companion (voice + vision + behavior
 (sit/stand) — now traced to hardware, see Faults.
 
 ## Hardware truths (hard-won — do not re-derive)
+- **TRUE WIRING MAP (user-verified per-port wiggle test 2026-09-04)** — nearly stock,
+  ONE deviation: back-left hip/knee pair swapped at the HAT.
+  P0=LH knee (SILENT), P1=LH hip, P2=LF hip, P3=LF knee (SILENT), P4=head yaw,
+  P5=head pitch, P6=head roll, P7=RF hip, P8=RF knee, P9=tail, P10=RH hip, P11=RH knee.
+  `DEFAULT_LEGS_PINS = [2, 3, 7, 8, 1, 0, 10, 11]` in pidog.py (deployed 2026-09-04).
+  Earlier guessed remaps ([7,8,2,3,...], [8,7,...]) were WRONG — never resurrect them.
 - **Back-left leg (idx4 hip=pin0, idx5 knee=pin1) is DIRECTION-INVERTED** vs stock
   convention. Fixed permanently in `pidog/pidog/pidog.py`: `leg_directions =
   [1,1,1,1,-1,-1,1,1]` passed to `Robot()`. Deployed to venv site-packages.
@@ -42,15 +48,17 @@ re-deriving anything:
 - sit angles `[30,60,-30,-60,80,-45,-80,45]`, zero all-0
 - `stop_and_lie` speed patched 85→30 (gentle shutdown slam)
 
-## Faults OPEN (2026-08-29)
-1. **Back-left HIP servo (pin 0) is DEAD — fully decoupled.** Progression on
-   2026-08-29: ratcheting drift under load (morning) → 15° dead arc loaded, 0.00%
-   response → by evening a 160° raw sweep (±80) moves the thigh ZERO even unloaded
-   on the pedestal, while a P1 knee control test visibly moves the leg (camera
-   method validated). Gear/spline stripped smooth. NO software remedy exists —
-   offsets measured physically ignored. ONLY fix: replace the servo.
-2. **Replacements needed: 2 servos** (back-left hip + tail slot). Purchase = user
-   decision, not yet placed.
+## Faults OPEN (2026-09-04)
+1. **P0 (back-left SHIN) and P3 (front-left SHIN) are UNRESPONSIVE** to raw
+   Servo() commands even at ±45. Suspected: cables unseated/disconnected (user
+   checking) or dead servos. These are exactly the two legs whose shins sat "up
+   at weird angles, unresponsive" in the calibration tool.
+   - REVISION of the 2026-08-29 verdict: under the true wiring map, P0 is the
+     back-left KNEE (not hip) and it was probably already unresponsive then —
+     the "dead hip" conviction watched the wrong joint. The Aug-29 pixel-diff
+     drift evidence still says *something* on P0 doesn't hold position.
+2. **Replacements possibly needed** if reseating P0/P3 cables doesn't revive
+   them. Purchase = user decision, not yet placed.
 3. **Head yaw servo hunts** (fast left-right shake on body movement) — unresolved;
    check neck horn screw, else swap-test.
 4. **CSI camera undetected** since board repositioning — companion degrades to
@@ -90,9 +98,14 @@ re-deriving anything:
   use email).
 
 ## Next steps (priority order)
-1. Fix back-left hip: horn tighten (P0 held at zero) or servo swap → re-run raw
-   repeatability → re-verify sit vs `known_good_sit.json`.
-2. Order 2 replacement servos (user purchase).
+1. Revive P0 + P3 (left shins): power off HAT (reboots Pi!), check both cables
+   seated + oriented like neighboring working ports, follow the wires from the
+   two left shin servos. Retest with `~/pidog_lab/port_finder.py` (type `0 45`,
+   `3 45`). If still dead → swap-test a known-good servo cable onto the port to
+   split servo-vs-HAT-channel.
+2. Once all 8 respond: `pidog/examples/0_calibration.py` (USER drives keyboard)
+   to true the zero pose → sit should land from known_good_sit.json values.
+3. Order replacement servos if P0/P3 servos are dead (user purchase).
 3. Stand tuning (was mid-sweep when the hip fault interfered) → IMU
    `auto_level2.py` for quantitative finish (dog flat on table, feet loaded).
 4. Head-yaw hunting, CSI cable re-seat.
