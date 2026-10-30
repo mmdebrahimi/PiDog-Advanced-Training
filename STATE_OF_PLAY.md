@@ -48,17 +48,15 @@ re-deriving anything:
 - sit angles `[30,60,-30,-60,80,-45,-80,45]`, zero all-0
 - `stop_and_lie` speed patched 85→30 (gentle shutdown slam)
 
-## Faults OPEN (2026-09-04)
-1. **P0 (back-left SHIN) and P3 (front-left SHIN) are UNRESPONSIVE** to raw
-   Servo() commands even at ±45. Suspected: cables unseated/disconnected (user
-   checking) or dead servos. These are exactly the two legs whose shins sat "up
-   at weird angles, unresponsive" in the calibration tool.
-   - REVISION of the 2026-08-29 verdict: under the true wiring map, P0 is the
-     back-left KNEE (not hip) and it was probably already unresponsive then —
-     the "dead hip" conviction watched the wrong joint. The Aug-29 pixel-diff
-     drift evidence still says *something* on P0 doesn't hold position.
-2. **Replacements possibly needed** if reseating P0/P3 cables doesn't revive
-   them. Purchase = user decision, not yet placed.
+## Faults OPEN (2026-10-30, swap tests with user as observer)
+1. **Back-left SHIN servo is DEAD** — confirmed: silent at ±45 on proven-good
+   P9 channel (PWM0<->PWM9 swap test). P0 HAT channel itself is GOOD (tail servo
+   moved ±45 on it). Replacement servo required.
+2. **Front-left SHIN silent on P3** at ±60 x3 — servo-vs-channel not yet split;
+   next: swap P3<->P0 cables (shin onto proven-good P0, tail onto suspect P3),
+   wiggle both. Battery 7.84V during tests.
+3. CABLE STATE RIGHT NOW: PWM0<->PWM9 still swapped (tail cable on P0, dead
+   back-left shin servo cable on P9). Restore when diagnostics done.
 3. **Head yaw servo hunts** (fast left-right shake on body movement) — unresolved;
    check neck horn screw, else swap-test.
 4. **CSI camera undetected** since board repositioning — companion degrades to
