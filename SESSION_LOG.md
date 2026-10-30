@@ -67,3 +67,4 @@ All code committed via auto-save cron. Plans archived to `executed_plans/`.
 - Sent laptop: geometry (LEG=42, FOOT=76, BODY 117x98), known-good sit, stand IK targets, voltage points. RL stall diagnosis: deploy.py never built + obs space needs encoders the servos don't have.
 - Git: set main upstream, rebased onto origin (laptop pushed 2 commits + branch laptop/sim-axis-defect-findings backing up trained policies), pushed ~10 local commits (wiring map etc.) — sim assets + state now backed up off-Pi.
 - STILL GATING: P0/P3 swap-test verdict (user swapped PWM0↔PWM9, never ran `port_finder.py` → `9 45` watching back-left shin) + brownout headroom test (needs user present).
+- Branch provenance (per laptop session): laptop/sim-axis-defect-findings is historical — pushed from the user's OLD machine during the July-Aug axis-defect era, no live clone on the current laptop. Treat as backup side branch; merging to main = user decision, do not auto-merge.
