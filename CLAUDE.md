@@ -36,9 +36,12 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 ## Key File Paths
 - SunFounder pidog library: `~/pidog_lab/pidog/pidog/pidog.py`
 - SunFounder robot-hat library: `~/pidog_lab/robot-hat/robot_hat/`
-- MuJoCo model: `~/pidog_lab/sim/pidog.xml`
-- RL environment: `~/pidog_lab/sim/pidog_env.py`
-- Training script: `~/pidog_lab/sim/train.py`
+- MuJoCo model: `~/pidog_lab/pidog.xml` (repo ROOT — `sim/` copy is LEGACY, see its banner)
+- RL environment: `~/pidog_lab/pidog_env.py` (29-dim residual-on-trot; `sim/pidog_env.py` and `rl_training_package/` are LEGACY)
+- Training script: `~/pidog_lab/train.py`
+- MVP gates: `~/pidog_lab/eval_mvp.py` (SB3 .zip), `~/pidog_lab/eval_npz.py` (extracted deploy/*.npz — the artifact the robot runs)
+- Deploy: `~/pidog_lab/deploy/deploy_pidog.py` (+ staged `policy_*.npz`, `power_audit.py`, runbooks)
+- Servo map: `~/pidog_lab/joint_mapping.csv` (AUTHORITATIVE, user-verified wiggle test 2026-10; deploy loads it fail-closed)
 - State logger: `~/pidog_lab/state_logger.py`
 - Plans: `~/pidog_lab/plans/`
 - Config (calibration): `~/.config/pidog/pidog.conf`
@@ -89,7 +92,9 @@ source ~/pidog_lab/.venv/bin/activate && python3 <script>.py
 - Voice updates wrapped in `_update_voice()` to catch network failures
 
 ## Current Work
-- RL Training: in progress on laptop (reward tuning, CUDA training)
+- RL Training: walking works in sim — 4 staged policies pass the MVP gate (`python eval_npz.py --report`); `policy_800k.npz` / `policy_trot29.npz` FAIL the gate (pre-residual) — NEVER deploy them
+- Hardware deploy: GATED. Sequence: (1) P3 swap test + back-left shin servo replacement (shin servo DEAD, channel P0 good — swap fixes the leg); (2) hw_checkup brownout step test = the deploy gate (trot policies command 8 simultaneous servos, known brownout regime; crawl reference = 4); (3) tethered `deploy_pidog.py --stand` to confirm mapping/sign chain; then `policy_dr_robust.npz` first with `--slew-cap 2 --stagger-ms 5`
+- Deploy safety: servo map comes ONLY from `joint_mapping.csv` (fail-closed); writes go through the I2C-locked `legs_move` buffer; battery prompt blocks policy runs on USB power
 - Voice Companion: working via Realtime API with person tracking + room awareness
 - Behavior Engine: working (GREET/TRACK/SEARCH/REST/SLEEP, LED ownership, sleep/wake)
 - Person Tracking: working (YuNet-first + TFLite fallback + MOSSE inter-frame + SORT + face ID)

@@ -18,7 +18,7 @@ User is adding a camera module. `vilib` is installed. Explore vision as an obser
 
 ### Domain Randomization for Sim-to-Real
 Date: 02/04/2026
-Implement domain randomization (action delays, observation noise, friction variation) to improve policy transfer from simulation to physical robot. Defer until basic policy walks in sim.
+**Implemented:** `deploy/policy_dr_robust.npz` is DR-trained and passes the MVP gate (351mm forward, verified 2026-10-30 via `eval_npz.py`). It is the recommended first policy for hardware deployment (see `deploy/HANDOFF_2026-10.md`).
 
 ## Low Priority
 

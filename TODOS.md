@@ -7,9 +7,17 @@
 - [x] Fix docstring in `pidog_env.py` line 14: ±20° → ±15°
 
 ## Pending
-- [ ] Run validation: `python pidog_env.py` standing test (should survive 100 steps at ~0.05m height)
-- [ ] Install PyTorch with CUDA: `pip install torch --index-url https://download.pytorch.org/whl/cu124`
-- [ ] Run baseline training: `python train.py --timesteps=3000000`
+- [x] Run baseline training — superseded by the residual-on-trot env; 4 staged policies pass the MVP gate (verified 2026-10-30 via `eval_npz.py`: straight_trot 461mm, dr_robust 351, fast_clean 496, smooth_trot 277)
+- [ ] Install PyTorch with CUDA: `pip install torch --index-url https://download.pytorch.org/whl/cu124` (optional — CPU training verified viable on the laptop, 2026-10)
+
+## Deploy gates (2026-10)
+- [ ] P3 (front-left shin) swap test — verdict pending
+- [ ] Replace back-left shin servo — DEAD (2026-10 verdict); PWM channel P0 confirmed good, so a servo swap fully fixes the leg. USER purchase decision.
+- [ ] Run hw_checkup brownout step test (2→4→6 simultaneous servos, charged battery, user present) — THE hardware deploy gate; compare against `power_audit.py` numbers (trot policies = 8 simultaneous)
+- [ ] If brownout test says <8 simultaneous safe: fire the crawl-gait retrain (env change prepared; CPU training verified viable)
+- [ ] Tethered `deploy_pidog.py --stand` to confirm the mapping/sign chain end-to-end
+- [ ] First floor run: `policy_dr_robust.npz` with `--slew-cap 2 --stagger-ms 5`
+- [ ] Rewrite `stand_doctor.py` prose — still targets the old LH-hip diagnosis; its probe/sweep modes are joint-agnostic and work for the shins unchanged
 
 ## Voice Companion
 - [x] Realtime API voice working (sub-second latency, function calling)
@@ -37,7 +45,7 @@
 - [ ] Enroll Alice's face and test first full interaction
 - [x] Reposition Pi board so CSI port faces head
 - [ ] Re-seat CSI camera cable (undetected since board repositioning 2026-08-10)
-- [ ] Replace back-left knee servo (pin 1) — CONFIRMED faulty 2026-08-10 (worn pot: consistent wrong settle + hunting; battery ruled out). Swap with tail servo or use kit spare, then re-zero horn
+- [ ] Replace back-left knee servo (pin 1) — CONFIRMED faulty 2026-08-10 (worn pot: consistent wrong settle + hunting; battery ruled out). 2026-10 update: back-left shin servo verdict is DEAD, PWM channel P0 confirmed good (see Deploy gates section — swap fully fixes the leg; user purchase decision). Note joint_mapping.csv corrected the LH pins (0↔1 swap)
 - [ ] Head yaw servo hunting (oscillates on disturbance) — check neck horn screw, else swap-test servo
 - [x] Tune head tracking smoothness (coast 15, sweep 8s, alpha 0.3, face lost 4s)
 - [x] Vision pipeline: YuNet-first detection, MOSSE inter-frame tracker, dead zone

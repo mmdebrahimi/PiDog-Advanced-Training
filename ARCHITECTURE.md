@@ -98,6 +98,24 @@ MuJoCo 3.6.0 (physics engine, CPU-only)
 - Pi 4: real robot control, data collection, policy inference
 - Desktop: MuJoCo visualization, RL training (40 FPS on Pi vs ~400+ on desktop)
 
+## Deployment Stack (deploy/)
+
+```
+eval_npz.py (MVP gate on extracted .npz policies)
+    |
+deploy/deploy_pidog.py (50 Hz numpy loop: PolicyMLP residual on scripted trot)
+    |
+joint_mapping.csv (authoritative servo map — loaded fail-closed, SystemExit if missing/malformed)
+    |
+Pidog.legs_move() (I2C-locked action buffer — never raw legs.servo_move())
+```
+
+- **Policies ship as extracted numpy weights** (`deploy/policy_*.npz`); the SB3 `.zip` checkpoints are not committed. `eval_npz.py` applies the same bar as `eval_mvp.py` (fwd ≥ 200mm, steps ≥ 800, fwd > |lateral|) directly to the .npz the robot runs. Verified 2026-10-30: straight_trot 461mm, dr_robust 351, fast_clean 496, smooth_trot 277 — all PASS; `policy_800k.npz` / `policy_trot29.npz` FAIL (pre-residual) — never deploy.
+- **Servo map is config-driven and fail-closed**: `deploy_pidog.py` refuses to run without `joint_mapping.csv` (user-verified 2026-10 wiggle map; LH pins corrected via a 0↔1 swap). No hardcoded fallback exists by design.
+- **Sign ownership**: the pidog lib's `legs_move()` applies `leg_directions` internally, so deploy sends uninverted angles; a runtime assertion keeps `SERVO_SIGN` identity to block double inversion. Final confirmation of the chain is the tethered `--stand` test.
+- **Power guards**: `--slew-cap` clamps per-tick commanded degrees per servo (inrush scales with step size); `--stagger-ms` buffers each tick's frame as four per-leg sub-frames so legs start sequentially (~2 simultaneous instead of 8); a battery prompt blocks non-`--stand` runs (USB cannot source servo stall current and mimics dead servos / reboots).
+- **`deploy/power_audit.py`** — offline supply-load proxy on the exact deploy command stream (scripted trot + clipped residual, alpha 0.8, 50 Hz). Measured: every trot policy commands 8 simultaneous servos (worst_sum 36–40 deg/tick) vs the crawl reference's 4 (8.9). The hardware brownout step test (`hw_checkup` harness) is the deploy gate: a policy is deployable on the power axis only when its max_simult ≤ the hardware-measured safe count.
+
 ## Voice Companion + Person Tracking Stack (buddy/)
 
 **Architecture:**

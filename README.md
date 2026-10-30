@@ -9,6 +9,7 @@ Workspace for learning robotics ground-up with a SunFounder PiDog robot on Raspb
 - Camera: OV5647 CSI camera (640×480) — mounted on head for person tracking
 - USB webcam (eMeet C960) — used for mic input
 - I2S Audio: Robot HAT speaker not producing audio on this revision; using HDMI output
+- Known fault (2026-10): back-left shin servo DEAD (PWM channel P0 confirmed good — a servo swap fully fixes the leg); P3 (front-left shin) swap test pending
 
 ## Setup
 
@@ -55,11 +56,17 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
   robot-hat/          # SunFounder HAT library (cloned)
   pidog/              # SunFounder PiDog library (cloned)
   vilib/              # SunFounder camera library (cloned)
-  sim/                # MuJoCo simulation (MJCF model, RL env, training)
-    pidog.xml         # MuJoCo model (8 actuators, correct geometry)
-    pidog_env.py      # Gymnasium RL environment
-    train.py          # PPO training script
-    sim_trot.py       # Scripted gait in sim
+  pidog.xml           # MuJoCo model (8 actuators) — LIVE copy at repo root
+  pidog_env.py        # Gymnasium RL env (29-dim, residual-on-trot) — LIVE copy at repo root
+  train.py            # PPO training script (checkpointed)
+  sim_trot.py         # Scripted gait in sim
+  eval_mvp.py         # MVP gate for SB3 .zip checkpoints
+  eval_npz.py         # MVP gate for extracted deploy/*.npz — the artifact the robot runs
+  joint_mapping.csv   # AUTHORITATIVE servo map (user-verified wiggle test, 2026-10)
+  sim/                # LEGACY sim copy (24-dim, no base gait) — see banner in sim/DESKTOP_TRAINING.md
+  rl_training_package/ # LEGACY training bundle (27-dim) — see banner in README.txt
+  deploy/             # Robot-side deploy: deploy_pidog.py, staged policy_*.npz,
+                      #   power_audit.py, hardware runbooks (WHEN_PI_IS_BACK.md, HANDOFF_2026-10.md)
   logs/               # State logger output (CSV at 50Hz)
   plans/              # Implementation plans
   executed_plans/     # Completed plans
@@ -134,7 +141,8 @@ Enabled via `raspi-config`. SunFounder dtoverlays copied to `/boot/firmware/over
 | 6 | First Manual Gait | Done (basic) |
 | 7 | ROS 2 Integration | Deferred |
 | 8 | MuJoCo Simulation | Done (model + scripted gait works) |
-| 9 | RL Training | **In progress** (pipeline works, training on laptop) |
+| 9 | RL Training | **Works in sim** (4 staged policies pass the MVP gate via `eval_npz.py`: straight_trot 461mm, fast_clean 496, dr_robust 351, smooth_trot 277; `policy_800k`/`policy_trot29` FAIL — never deploy) |
+| 10 | Hardware Deploy | **Gated** (power audit done — trot = 8 simultaneous servos, known brownout regime; awaiting hw brownout step test + back-left shin servo replacement) |
 | - | Voice Companion | **Working** (buddy/ — Realtime API + function calling + long-term memory) |
 | - | Person Tracking | **Working** (YuNet face + TFLite person fallback + MOSSE + SORT + SFace face ID) |
 | - | Room Awareness | **Working** (who's here → LLM context, voice commands: "who can you see?") |
