@@ -56,23 +56,65 @@ def scripted_trot_deg(phase):
         return np.array([s[0]-S, s[1], s[2]-S, s[3]-L, s[4]+S, s[5]+L, s[6]+S, s[7]])
     return np.array([s[0]+S, s[1]+L, s[2]+S, s[3], s[4]-S, s[5], s[6]-S, s[7]-L])
 
-# ===== PiDog servo mapping =====
-# PiDog has 12 servos (3 per leg: shoulder, upper, lower) but the sim uses 2
-# per leg (hip + knee). You MUST map sim's 8 joints onto PiDog's servos.
-# FILL THIS IN with the correct indices for your PiDog build.
+# ===== PiDog servo mapping (config-driven) =====
+# PiDog has 12 servos: 2 per leg (upper=hip, lower=knee) + 3 head + 1 tail.
+# (An earlier docstring here claimed "3 per leg" — wrong; kept corrected.)
 #
-# Example mapping (VERIFY BEFORE RUNNING):
-#   sim joint 0 (LF_hip)  -> PiDog servo index 1 (left-front upper)
-#   sim joint 1 (LF_knee) -> PiDog servo index 2 (left-front lower)
-#   ...
-SIM_TO_PIDOG_SERVO = {
-    0: 1,  1: 2,   # LF hip, knee
-    2: 4,  3: 5,   # RF hip, knee
-    4: 7,  5: 8,   # LH hip, knee
-    6: 10, 7: 11,  # RH hip, knee
-}
-# Some servos may be mechanically reversed — set to -1 to invert angle.
-SERVO_SIGN = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+# The AUTHORITATIVE map is ../joint_mapping.csv (user-verified per-port wiggle
+# test, 2026-10). This module refuses to run without it — a hardcoded fallback
+# is exactly how the robot ends up driven on a stale map.
+#
+# Sign ownership (single owner): the pidog lib's legs_move() pipeline applies
+# leg_directions internally, so deploy sends UNINVERTED joint angles in legs-index
+# order and never re-applies a sign. SERVO_SIGN stays identity unless
+# joint_mapping.csv ever grows an explicit sign column; a runtime check enforces
+# this so a double inversion cannot creep in silently. Final confirmation of the
+# whole chain is the hardware --stand test (tethered).
+import csv as _csv
+import os as _os
+
+_CSV_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "joint_mapping.csv")
+_EXPECTED_JOINTS = ["LF_upper", "LF_lower", "RF_upper", "RF_lower",
+                    "LH_upper", "LH_lower", "RH_upper", "RH_lower"]
+
+
+def load_servo_map(csv_path=_CSV_PATH):
+    """Read joint_mapping.csv -> (sim_to_legs_index, servo_sign, legs_index_to_pin).
+
+    Fails closed: missing file or missing/duplicate leg joints -> SystemExit.
+    sim joint order (LF_hip, LF_knee, RF_hip, RF_knee, LH_hip, LH_knee,
+    RH_hip, RH_knee) corresponds to csv joint_names LF_upper, LF_lower, ...
+    """
+    if not _os.path.isfile(csv_path):
+        raise SystemExit(f"REFUSING to run: joint_mapping.csv not found at {csv_path} — "
+                         "the servo map must come from the verified csv, never a hardcoded default.")
+    rows = {}
+    with open(csv_path, newline="") as f:
+        for r in _csv.DictReader(f):
+            if r.get("body_part") == "legs":
+                rows[r["joint_name"]] = r
+    missing = [j for j in _EXPECTED_JOINTS if j not in rows]
+    if missing or len(rows) != 8:
+        raise SystemExit(f"REFUSING to run: joint_mapping.csv malformed — missing {missing}, "
+                         f"got {sorted(rows)}")
+    sim_to_legs = {}
+    legs_to_pin = {}
+    sign = {}
+    for sim_i, jname in enumerate(_EXPECTED_JOINTS):
+        legs_idx = int(rows[jname]["index"])
+        sim_to_legs[sim_i] = legs_idx
+        legs_to_pin[legs_idx] = int(rows[jname]["pin"])
+        # Sign owner is the pidog lib (leg_directions); csv has no sign column, so identity.
+        sign[sim_i] = 1
+    if sorted(sim_to_legs.values()) != list(range(8)):
+        raise SystemExit("REFUSING to run: csv legs indices are not a permutation of 0..7")
+    return sim_to_legs, sign, legs_to_pin
+
+
+SIM_TO_PIDOG_SERVO, SERVO_SIGN, LEGS_INDEX_TO_PIN = load_servo_map()
+assert all(v == 1 for v in SERVO_SIGN.values()), (
+    "SERVO_SIGN must stay identity: the pidog lib's legs_move applies leg_directions; "
+    "a deploy-side sign would double-invert.")
 
 
 class PolicyMLP:
@@ -105,12 +147,16 @@ class PiDogInterface:
         self._last_read_t = time.time()
 
     def _read_joint_angles_rad(self):
-        """Return 8-dim array of current joint angles in radians (sim order)."""
-        # pidog.Pidog has .legs.servo_angles (12-element) - map to 8.
+        """Return 8-dim array of current joint angles in radians (sim order).
+
+        No encoders exist: .legs.servo_angles is the lib's last-COMMANDED cache
+        (8-element, legs-index order). That commanded-position proxy is exactly
+        what the obs layout expects on this hardware.
+        """
         pidog_angles_deg = np.array(self.dog.legs.servo_angles, dtype=np.float64)
         out = np.zeros(8)
-        for sim_i, pidog_i in SIM_TO_PIDOG_SERVO.items():
-            out[sim_i] = SERVO_SIGN[sim_i] * pidog_angles_deg[pidog_i]
+        for sim_i, legs_i in SIM_TO_PIDOG_SERVO.items():
+            out[sim_i] = SERVO_SIGN[sim_i] * pidog_angles_deg[legs_i]
         return np.radians(out)
 
     def read_imu(self):
@@ -137,11 +183,19 @@ class PiDogInterface:
         return cur, vel
 
     def set_joint_targets_deg(self, targets_deg):
-        """Write 8 joint targets (sim order, degrees) to PiDog servos."""
-        angles = list(self.dog.legs.servo_angles)  # 12-element
-        for sim_i, pidog_i in SIM_TO_PIDOG_SERVO.items():
-            angles[pidog_i] = float(SERVO_SIGN[sim_i] * targets_deg[sim_i])
-        self.dog.legs.servo_move(angles, speed=100)
+        """Write 8 joint targets (sim order, degrees) to PiDog leg servos.
+
+        Routes through dog.legs_move (I2C-locked action buffer) — NOT the raw
+        dog.legs.servo_move(), which has no I2C locking (see stand_doctor.py's
+        safety note). legs_move applies leg_directions internally, so angles
+        here are uninverted.
+        """
+        angles = [0.0] * 8
+        for sim_i, legs_i in SIM_TO_PIDOG_SERVO.items():
+            angles[legs_i] = float(SERVO_SIGN[sim_i] * targets_deg[sim_i])
+        # No wait_legs_done(): this is a 50 Hz loop — immediately=True replaces
+        # the buffered frame each tick, and blocking would break the loop rate.
+        self.dog.legs_move([angles], immediately=True, speed=98)
 
     def stop(self):
         self.dog.do_action('sit', speed=60)

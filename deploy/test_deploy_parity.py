@@ -136,3 +136,37 @@ def test_deploy_scripted_base_gait_matches_env():
         dep_base = np.asarray(deploy_pidog.scripted_trot_deg(phase), float)
         max_err = max(max_err, float(np.max(np.abs(env_base - dep_base))))
     assert max_err < 1e-9, f"deploy scripted base gait drifted from env by {max_err:.2e}"
+
+
+# ---- servo-map config loading (2026-10: map is csv-driven, fail-closed) ----
+
+def test_servo_map_loaded_from_csv_matches_verified_wiring():
+    """Pins the csv-loaded map to the 2026-10 user-verified wiggle test:
+    legs pins [2,3,7,8,1,0,10,11] in legs-index order (LH pair swapped at HAT),
+    sim->legs mapping the identity permutation, and SERVO_SIGN identity
+    (the pidog lib's legs_move owns leg_directions — a deploy-side sign
+    would double-invert)."""
+    sim_to_legs, sign, legs_to_pin = deploy_pidog.load_servo_map()
+    assert sim_to_legs == {i: i for i in range(8)}
+    assert all(v == 1 for v in sign.values())
+    pins = [legs_to_pin[i] for i in range(8)]
+    assert pins == [2, 3, 7, 8, 1, 0, 10, 11], (
+        f"legs pins {pins} diverge from the user-verified wiring map"
+    )
+
+
+def test_servo_map_missing_csv_refuses(tmp_path):
+    """Fail closed: no csv -> SystemExit, never a silent hardcoded default."""
+    with pytest.raises(SystemExit):
+        deploy_pidog.load_servo_map(str(tmp_path / "absent.csv"))
+
+
+def test_servo_map_malformed_csv_refuses(tmp_path):
+    """Fail closed on a csv that lost a leg joint."""
+    bad = tmp_path / "joint_mapping.csv"
+    bad.write_text(
+        "body_part,index,pin,joint_name,neutral_angle,direction_positive,min_safe,max_safe,notes\n"
+        "legs,0,2,LF_upper,0,shoulder forward,-45,45,\n"
+    )
+    with pytest.raises(SystemExit):
+        deploy_pidog.load_servo_map(str(bad))
