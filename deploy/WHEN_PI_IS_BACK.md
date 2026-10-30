@@ -1,5 +1,25 @@
 # WHEN THE PI IS BACK — one turnkey sequence
 
+> ## OCTOBER 2026 UPDATE (2026-10-30, laptop/oct-reconciliation)
+> Hardware state moved on since this runbook was written:
+> - Wiring map is now USER-VERIFIED (per-port wiggle test): legs pins [2,3,7,8,1,0,10,11],
+>   back-left hip/knee pair swapped at the HAT. `joint_mapping.csv` carries the corrected map
+>   and `deploy_pidog.py` now LOADS it (fail-closed; hardcoded example dicts removed).
+> - Section 1's blocker evolved: **back-left (LH) shin servo is DEAD** (swap test: channel P0
+>   good, servo dead); **front-left (P3) shin swap test still pending.** Replacement servo is a
+>   user purchase decision. stand_doctor's --map-probe/--sweep flow covers this diagnosis as-is.
+> - Power: `deploy/power_audit.py` (new) measures the deploy command stream offline. Every
+>   staged TROT policy commands 8 simultaneous servos (worst_sum 36-40 deg/tick) vs the crawl
+>   reference's 4 (8.9). Known hardware point: 8 simultaneous = reboot at ~8.0V. Run the
+>   hw_checkup brownout step test BEFORE any policy deploy; if <8 simultaneous is the ceiling,
+>   deploy with `--slew-cap` / `--stagger-ms` (new flags) or wait for the crawl-gait retrain
+>   (prepared, fires on the measured verdict).
+> - `eval_npz.py` (new) gates the .npz artifacts the robot actually runs: straight_trot 461mm
+>   PASS, dr_robust 351mm PASS, fast_clean 496mm PASS, smooth_trot 277mm PASS;
+>   policy_800k / policy_trot29 FAIL the gate (pre-residual artifacts) — never deploy those two.
+> - deploy writes now route through the I2C-locked `legs_move` buffer (raw `legs.servo_move`
+>   had no locking); battery confirmation prompt added before policy runs (`--yes` skips).
+
 Single ordered runbook tying together every off-Pi artifact prepared while the Pi was
 offline. Do these in order. Each links the detailed doc/script. Goal: get from "Pi powered
 on" to "robot stands, walks, and talks" with zero re-derivation.
@@ -48,7 +68,7 @@ cd ~/pidog_deploy_v3 && bash run.sh    # or: python deploy_pidog.py --stand   (v
 #                                         then release into the full policy
 ```
 Deploy candidates (in `deploy/`):
-- `policy_straight_trot.npz` = **run18** (best clean trot, 466mm) — start here for a flat floor.
+- `policy_straight_trot.npz` = **run18** (best clean trot, 466mm; 461mm re-verified on laptop 2026-10-30) — start here for a flat floor ONLY after the brownout step test clears 8 simultaneous servos (see October update above).
 - `policy_dr_robust.npz` = **run19 (domain-randomized)** — 330mm fwd / 252mm lat in sim,
   SLOWER than run18 but DR-trained for sim->real transfer. **Recommended for the FIRST
   hardware attempt** (a sim-overfit fast policy risks thrashing servos); switch to
