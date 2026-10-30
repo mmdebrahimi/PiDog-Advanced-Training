@@ -59,3 +59,11 @@ All code committed via auto-save cron. Plans archived to `executed_plans/`.
 - Servo in this slot = the ex-TAIL servo (swapped during knee repair). Verdict: horn slipping on spline OR internal gear slip. Horn-screw check pending; if tight -> servo dead, replacement needed (2 dead servos total now: tail + back-left hip).
 - Known-good sit recipe recorded at captures/known_good_sit.json (directions/offsets/angles) — diff against live state to detect future regressions.
 - P0 held at zero via background process for horn tightening.
+
+## 2026-10-30 — Cross-session collab with laptop (robotics-b9) + repo sync
+
+- Laptop session ran sim-to-real survey (memo on laptop: research_outputs/pidog_sim_to_real_sota_2026-10-29.md). Verdict: staged path — Stage 1 = STOCK Walk class (already a one-leg-at-a-time 48-frame crawl) under corrected pin map; Stage 2 = on-hardware Bayesian opt over walk params; Stage 3 = sim-to-real RL only after actuator model bench-fit.
+- Milestone ladder for user coaching: IMU tilt logger → sequenced stand → barycenter weight-shift (tilt <5°) → single-leg lift → stock walk. Weight-shift needs ~15-20mm barycenter move toward diagonal rear corner before any lift (CoM sits ON support-triangle edge by construction).
+- Sent laptop: geometry (LEG=42, FOOT=76, BODY 117x98), known-good sit, stand IK targets, voltage points. RL stall diagnosis: deploy.py never built + obs space needs encoders the servos don't have.
+- Git: set main upstream, rebased onto origin (laptop pushed 2 commits + branch laptop/sim-axis-defect-findings backing up trained policies), pushed ~10 local commits (wiring map etc.) — sim assets + state now backed up off-Pi.
+- STILL GATING: P0/P3 swap-test verdict (user swapped PWM0↔PWM9, never ran `port_finder.py` → `9 45` watching back-left shin) + brownout headroom test (needs user present).
