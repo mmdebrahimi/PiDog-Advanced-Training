@@ -182,20 +182,36 @@ class PiDogInterface:
         self._last_read_t = now
         return cur, vel
 
-    def set_joint_targets_deg(self, targets_deg):
+    def set_joint_targets_deg(self, targets_deg, stagger=False):
         """Write 8 joint targets (sim order, degrees) to PiDog leg servos.
 
         Routes through dog.legs_move (I2C-locked action buffer) — NOT the raw
         dog.legs.servo_move(), which has no I2C locking (see stand_doctor.py's
         safety note). legs_move applies leg_directions internally, so angles
         here are uninverted.
+
+        stagger=True (power guard): instead of one 8-servo frame, buffer four
+        per-leg sub-frames so legs begin moving sequentially — lowers the
+        simultaneous-inrush count from 8 to ~2 at the cost of intra-tick lag.
         """
+        current = [0.0] * 8
         angles = [0.0] * 8
+        last_deg = np.degrees(self._last_joint_rad)
         for sim_i, legs_i in SIM_TO_PIDOG_SERVO.items():
+            current[legs_i] = float(SERVO_SIGN[sim_i] * last_deg[sim_i])
             angles[legs_i] = float(SERVO_SIGN[sim_i] * targets_deg[sim_i])
+        if stagger:
+            frames = []
+            acc = list(current)
+            for leg in range(4):
+                acc[2 * leg] = angles[2 * leg]
+                acc[2 * leg + 1] = angles[2 * leg + 1]
+                frames.append(list(acc))
+        else:
+            frames = [angles]
         # No wait_legs_done(): this is a 50 Hz loop — immediately=True replaces
-        # the buffered frame each tick, and blocking would break the loop rate.
-        self.dog.legs_move([angles], immediately=True, speed=98)
+        # the buffered frames each tick, and blocking would break the loop rate.
+        self.dog.legs_move(frames, immediately=True, speed=98)
 
     def stop(self):
         self.dog.do_action('sit', speed=60)
@@ -265,7 +281,12 @@ def run(args):
             # Residual control: scripted symmetric trot + small learned residual
             target_deg = scripted_trot_deg(gait_phase) + action * RESIDUAL_DEG
             ctrl_deg = SMOOTHING_ALPHA * last_ctrl_deg + (1 - SMOOTHING_ALPHA) * target_deg
-            dog.set_joint_targets_deg(ctrl_deg)
+            if args.slew_cap > 0:
+                # Power guard: clamp per-tick commanded delta per servo. Inrush
+                # scales with step size; this bounds it at the cost of gait fidelity.
+                delta = np.clip(ctrl_deg - last_ctrl_deg, -args.slew_cap, args.slew_cap)
+                ctrl_deg = last_ctrl_deg + delta
+            dog.set_joint_targets_deg(ctrl_deg, stagger=args.stagger_ms > 0)
             last_ctrl_deg = ctrl_deg
 
             gait_phase = (gait_phase + 2 * np.pi / GAIT_PERIOD_STEPS) % (2 * np.pi)
@@ -293,4 +314,20 @@ if __name__ == "__main__":
                    help="Number of 50Hz steps to run (default 500 = 10s)")
     p.add_argument("--stand", action="store_true",
                    help="Standing test only — hold STAND_DEG for 5s, no policy")
-    run(p.parse_args())
+    p.add_argument("--slew-cap", type=float, default=0.0,
+                   help="Power guard: max commanded degrees per servo per 20ms tick "
+                        "(0 = off). Bounds inrush at the cost of gait fidelity.")
+    p.add_argument("--stagger-ms", type=float, default=0.0,
+                   help="Power guard: >0 staggers each tick's frame into per-leg "
+                        "sub-frames via the legs_move buffer so legs start moving "
+                        "sequentially, not simultaneously (exact ms pacing is "
+                        "servo-speed-bound, value is advisory; 0 = off).")
+    p.add_argument("--yes", action="store_true",
+                   help="Skip the battery confirmation prompt.")
+    _args = p.parse_args()
+    if not _args.stand and not _args.yes:
+        resp = input("Battery check: charged 2S pack attached (NOT USB — USB cannot "
+                     "source servo stall current and mimics dead servos / reboots)? [y/N] ")
+        if resp.strip().lower() != "y":
+            raise SystemExit("Aborted at battery check. Re-run with --yes to skip.")
+    run(_args)
