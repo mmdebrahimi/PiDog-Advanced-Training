@@ -1,3 +1,8 @@
+*** LEGACY (banner added 2026-10-30): this package's pidog_env.py (27-dim, direct control) has NO
+*** scripted base gait — 8 PPO configs all failed on this class of env (see
+*** deploy/LAPTOP_FINDINGS_2026-07-09.md). Train against the repo-ROOT pidog_env.py (29-dim
+*** residual) and gate with eval_mvp.py / eval_npz.py instead.
+
 Nounou RL Training Package
 ==========================
 

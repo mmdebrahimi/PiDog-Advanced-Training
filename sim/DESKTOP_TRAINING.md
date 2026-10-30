@@ -1,3 +1,11 @@
+> [!WARNING] LEGACY DOCUMENT (superseded 2026-07-09; banner added 2026-10-30).
+> The env this doc describes (sim/pidog_env.py, 24-dim) has NO scripted base gait and is NOT the
+> training stack. The live stack is at repo ROOT: pidog_env.py (29-dim residual-on-trot),
+> train.py (checkpointed), eval_mvp.py / eval_npz.py (the MVP gate), deploy/ (runs on the robot;
+> deploy_pidog.py + staged policies + runbooks). A collaborating session read this file and
+> reconstructed a false 'deploy was never built' history — hence this banner. See
+> deploy/LAPTOP_FINDINGS_2026-07-09.md for the full reconciliation + axis-defect retraction.
+
 # PiDog RL Training — Desktop Setup
 
 ## Quick Start
