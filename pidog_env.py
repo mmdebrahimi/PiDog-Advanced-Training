@@ -56,9 +56,18 @@ RESIDUAL_DEG = 12.0  # run15: back to 12 (run13's value gave straight+symmetric 
 class PiDogEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 25}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, base_gait=None):
         super().__init__()
         self.render_mode = render_mode
+
+        # Base gait the residual rides on: "trot" (default, run15-21 lineage) or
+        # "crawl" (one-leg-at-a-time, power-budget gait — the robot browns out when
+        # 8 servos move simultaneously, which the trot demands; see
+        # deploy/power_audit.py). Env var PIDOG_BASE_GAIT reaches SubprocVecEnv
+        # workers, same pattern as PIDOG_DR / PIDOG_SMOOTH.
+        self.base_gait = base_gait or os.environ.get("PIDOG_BASE_GAIT", "trot")
+        if self.base_gait not in ("trot", "crawl"):
+            raise ValueError(f"base_gait must be 'trot' or 'crawl', got {self.base_gait!r}")
 
         self.model = mujoco.MjModel.from_xml_path(MODEL_PATH)
         self.data = mujoco.MjData(self.model)
@@ -117,9 +126,15 @@ class PiDogEnv(gym.Env):
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f)
             for f in ("lf_foot", "rf_foot", "lh_foot", "rh_foot")
         ]
-        self.GAIT_FREQ_HZ = 2.0                       # trot cadence
+        # Cadence: trot 2.0 Hz (run15-21 lineage). Crawl 1.0 Hz — each leg gets a
+        # 250ms swing quarter; faster would demand near-trot servo speeds and
+        # defeat the power-sequencing purpose.
+        self.GAIT_FREQ_HZ = 2.0 if self.base_gait == "trot" else 1.0
         self._phase_inc = 2.0 * np.pi * self.GAIT_FREQ_HZ / 50.0  # 50Hz control
         self._phase = 0.0
+        if self._smooth and self.base_gait != "trot":
+            raise ValueError("PIDOG_SMOOTH shaping encodes the trot stance schedule; "
+                             "it is not defined for base_gait='crawl'")
         self._yaw0 = 0.0                              # initial heading, set in reset()
         self.CONTACT_Z = 0.012                        # foot "down" below 12mm
 
@@ -184,6 +199,52 @@ class PiDogEnv(gym.Env):
             s[4] - S, s[5],              # LH stance
             s[6] - S, s[7] - L,          # RH swing
         ], dtype=np.float64)
+
+    # Crawl swing order: LF, RH, RF, LH (sim leg indices 0,3,1,2) — mirrors the
+    # stock SunFounder lib's one-leg-at-a-time lift sequence.
+    CRAWL_ORDER = (0, 3, 1, 2)
+
+    def _scripted_crawl_deg(self):
+        """Scripted one-leg-at-a-time crawl target joints (deg) for the current phase.
+
+        Power-budget base gait: exactly one leg swings per quarter cycle while the
+        three stance legs drift their stride back linearly (net body motion), so at
+        most one leg's pair of servos moves hard at any tick — matching the
+        hardware's sequenced-motion power envelope.
+
+        Per leg, a stride variable u in [-1, +1]: cosine-eased -1 -> +1 during the
+        leg's swing quarter (with a sin-profile knee lift), linear +1 -> -1 drift
+        across its three stance quarters. Sign conventions are lifted from
+        _scripted_trot_deg: left legs swing (+S hip, +L knee), right legs mirrored.
+        """
+        s = STAND_DEG
+        L, S = GAIT_LIFT, GAIT_SWING
+        phase = self._phase % (2 * np.pi)
+        quarter = int(phase // (np.pi / 2.0)) % 4
+        t = (phase % (np.pi / 2.0)) / (np.pi / 2.0)  # 0..1 within the quarter
+
+        out = np.array(s, dtype=np.float64)
+        for slot, leg in enumerate(self.CRAWL_ORDER):
+            right = leg in (1, 3)                 # RF, RH mirrored signs
+            hip_sign = -S if right else S
+            knee_sign = -L if right else L
+            if slot == quarter:                   # swing: stride -1 -> +1, knee lifts
+                u = -np.cos(np.pi * t)            # cosine ease
+                lift = np.sin(np.pi * t)
+            else:                                 # stance: linear drift +1 -> -1
+                since_swing = (quarter - slot) % 4          # 1..3 quarters since swing
+                prog = (since_swing - 1 + t) / 3.0          # 0..1 across stance
+                u = 1.0 - 2.0 * prog
+                lift = 0.0
+            out[2 * leg] += hip_sign * u
+            out[2 * leg + 1] += knee_sign * lift
+        return out
+
+    def _scripted_base_deg(self):
+        """Dispatch: the scripted base gait the residual policy rides on."""
+        if self.base_gait == "crawl":
+            return self._scripted_crawl_deg()
+        return self._scripted_trot_deg()
 
     def _compute_reward(self, action, terminated):
         """Residual-mode reward: go forward along the initial heading, straight + upright.
@@ -310,8 +371,8 @@ class PiDogEnv(gym.Env):
         action = np.asarray(action, dtype=np.float32)
         prev_action = self._last_action.copy()
 
-        # Residual control: scripted symmetric trot + small learned residual
-        target_ctrl_deg = self._scripted_trot_deg() + action * RESIDUAL_DEG
+        # Residual control: scripted base gait (trot or crawl) + small learned residual
+        target_ctrl_deg = self._scripted_base_deg() + action * RESIDUAL_DEG
 
         # Exponential smoothing prevents sudden servo jumps (sim-to-real friendly)
         a = self._smooth_alpha

@@ -218,6 +218,9 @@ def main():
     parser.add_argument("--eval", action="store_true", help="Evaluate saved model")
     parser.add_argument("--render", action="store_true", help="Render video of trained policy")
     parser.add_argument("--model", default=POLICY_PATH, help="Model path for eval/render")
+    parser.add_argument("--save", default=POLICY_PATH,
+                        help="Save path for training (default pidog_policy; use a distinct "
+                             "path for non-trot runs, e.g. pidog_policy_crawl)")
     args = parser.parse_args()
 
     if args.eval:
@@ -225,7 +228,7 @@ def main():
     elif args.render:
         render_video(args.model)
     else:
-        train(args.timesteps)
+        train(args.timesteps, save_path=args.save)
 
 
 if __name__ == "__main__":
