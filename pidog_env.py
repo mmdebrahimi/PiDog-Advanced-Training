@@ -132,6 +132,9 @@ class PiDogEnv(gym.Env):
         self.GAIT_FREQ_HZ = 2.0 if self.base_gait == "trot" else 1.0
         self._phase_inc = 2.0 * np.pi * self.GAIT_FREQ_HZ / 50.0  # 50Hz control
         self._phase = 0.0
+        # Residual authority is gait-specific (trot 12 = run15-21 lineage, pinned
+        # by deploy parity tests; crawl 18 — see CRAWL_RESIDUAL_DEG comment).
+        self._residual_deg = RESIDUAL_DEG if self.base_gait == "trot" else self.CRAWL_RESIDUAL_DEG
         if self._smooth and self.base_gait != "trot":
             raise ValueError("PIDOG_SMOOTH shaping encodes the trot stance schedule; "
                              "it is not defined for base_gait='crawl'")
@@ -203,6 +206,17 @@ class PiDogEnv(gym.Env):
     # Crawl swing order: LF, RH, RF, LH (sim leg indices 0,3,1,2) — mirrors the
     # stock SunFounder lib's one-leg-at-a-time lift sequence.
     CRAWL_ORDER = (0, 3, 1, 2)
+    # Crawl-specific base amplitudes + residual authority (2026-10-31 sweep over
+    # 72 scripted-only configs x both stride signs: EVERY config drifts backward
+    # from foot slip — same structural bias as the trot base's -74mm standalone —
+    # and backward drift scales with amplitude/cadence, so the least-backward
+    # base wins: flipped stride, S=10, L=20, 1.0Hz = -10mm/5s. The residual gets
+    # 18 deg authority (vs trot's 12) because the gentle 1Hz base gives the
+    # policy less dynamics to shape; run14's over-authorization failure was
+    # dynamic flail on the 2Hz trot, which the statically-stable crawl avoids.)
+    CRAWL_SWING = 10.0
+    CRAWL_LIFT = 20.0
+    CRAWL_RESIDUAL_DEG = 18.0
 
     def _scripted_crawl_deg(self):
         """Scripted one-leg-at-a-time crawl target joints (deg) for the current phase.
@@ -218,7 +232,7 @@ class PiDogEnv(gym.Env):
         _scripted_trot_deg: left legs swing (+S hip, +L knee), right legs mirrored.
         """
         s = STAND_DEG
-        L, S = GAIT_LIFT, GAIT_SWING
+        L, S = self.CRAWL_LIFT, self.CRAWL_SWING
         phase = self._phase % (2 * np.pi)
         quarter = int(phase // (np.pi / 2.0)) % 4
         t = (phase % (np.pi / 2.0)) / (np.pi / 2.0)  # 0..1 within the quarter
@@ -226,7 +240,9 @@ class PiDogEnv(gym.Env):
         out = np.array(s, dtype=np.float64)
         for slot, leg in enumerate(self.CRAWL_ORDER):
             right = leg in (1, 3)                 # RF, RH mirrored signs
-            hip_sign = -S if right else S
+            # Stride sign FLIPPED vs the trot convention (measured least-backward
+            # in the 2026-10-31 sweep; see class-constant comment).
+            hip_sign = S if right else -S
             knee_sign = -L if right else L
             if slot == quarter:                   # swing: stride -1 -> +1, knee lifts
                 u = -np.cos(np.pi * t)            # cosine ease
@@ -372,7 +388,7 @@ class PiDogEnv(gym.Env):
         prev_action = self._last_action.copy()
 
         # Residual control: scripted base gait (trot or crawl) + small learned residual
-        target_ctrl_deg = self._scripted_base_deg() + action * RESIDUAL_DEG
+        target_ctrl_deg = self._scripted_base_deg() + action * self._residual_deg
 
         # Exponential smoothing prevents sudden servo jumps (sim-to-real friendly)
         a = self._smooth_alpha
