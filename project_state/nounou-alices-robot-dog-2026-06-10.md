@@ -104,13 +104,14 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 | MuJoCo over Isaac Sim for simulation | 2026-04-02 | CPU-only, runs on Pi 4, better Python API |
 | Alice's reaction IS the roadmap for Tier 2 features | 2026-06-10 | Don't build in a vacuum for a 7-year-old |
 | Resolved Pending Decision row 1: Wired speaker soldered to Robot HAT chosen instead of Bluetooth — larger speaker replaced stock unit, audio confirmed working 2026-08-09; amp idle hiss mitigated by mute-between-speech | 2026-08-10 | Auto-linked by /project-state --resolve-pending-decision (v0.2). Original decision text preserved at Pending Decisions row 1 with RESOLVED prefix. |
+| Resolved Pending Decision row 2: RL training on laptop resumes NOW (user decision 2026-11-14, Soraya advance-2026-11-14 disposition gate). Laptop session robotics-b9 active; staged roadmap has RL as Stage 3 but user greenlights immediate resumption of laptop training work. | 2026-11-14 | Auto-linked by /project-state --resolve-pending-decision (v0.2). Original decision text preserved at Pending Decisions row 2 with RESOLVED prefix. |
 <!-- project-state:end:decisions-made -->
 
 ### Pending Decisions
 | Decision | Proposer | Blocker | Notes |
 |---|---|---|---|
 | RESOLVED 2026-08-10: Which BT speaker to use | user | hardware purchase | Needs decent audio quality + portability |
-| When to resume RL training on laptop | user | laptop availability | Parallel track, not blocking companion |
+| RESOLVED 2026-11-14: When to resume RL training on laptop | user | laptop availability | Parallel track, not blocking companion |
 <!-- project-state:end:pending-decisions -->
 
 ## Bellman-Inspired Decision Frame
@@ -118,7 +119,7 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 Per D5: surfaces the Bellman cognitive frame at the architecture level. v0.1 populates this at init; v0.2's `/project-step` reads from it to decide next actions. v0.1 does NOT iterate over the frame — it sets it up.
 
 ### Current state (one-line summary)
-Companion 90% complete; wired HAT speaker working + shutdown voice cmd shipped; Pi board repositioned but CSI camera now undetected; servo-horn recalibration mid-flight (back-left leg extends irregularly at stand, head yaw servo hunting); RL track still stalled on laptop.
+Companion 90% complete; TRUE wiring map established (user-verified, deployed); back-left shin servo confirmed DEAD, P0 channel good, front-left shin verdict pending P3<->P0 swap test; gait roadmap agreed with laptop session robotics-b9 (stock crawl under corrected pins -> BO tuning -> RL Stage 3); RL training greenlit to resume on laptop 2026-11-14.
 
 ### Target state / terminal condition
 Alice has a sustained daily interaction with Nounou — she talks to him, he recognizes her, follows her smoothly, expresses personality, remembers their history, and eventually walks to her.
@@ -182,6 +183,9 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 | 21 | 2026-08-11 | edit-local-code | Permanent boot-time HAT speaker mute: user systemd service hat-speaker-mute.service mutes soc_sound PipeWire sink at every boot (30s retry, pattern-matched sink name) + loginctl linger enabled so it fires at boot not desktop login | complete — service verified exit 0, sink muted; companion speech unmute unchanged |
 | 22 | 2026-08-11 | edit-local-code | ROOT CAUSE: back-left leg (idx4/idx5) direction-inverted vs stock convention (zero pose cannot reveal it — mirrored L looks identical); leg_directions [1,1,1,1,-1,-1,1,1] baked into pidog.py + deployed; user-confirmed sit near-perfect with runtime offsets knee -30 / tail -45 | sit VERIFIED by user; offsets not yet persisted to pidog.conf; close() speed-85 lie slam end-pose anomaly open |
 | 23 | 2026-08-29 | run-tests | Raw repeatability test on back-left hip (pin 0, ex-tail servo): 3 identical 0/+45/0/-45/0 cycles via bare Servo API + webcam pixel-diff; commanded-zero drifted 6.9->14.4->15.6% (45deg swing = 6.8%), monotonic rearward ratchet | back-left hip servo convicted — slip is below all software; horn-screw check pending, else replace (2 dead servos: tail + LH hip); known-good sit recipe archived captures/known_good_sit.json |
+| 24 | 2026-11-14 | ask-user | /project-state --resolve-pending-decision | Pending Decisions row 2: RL training on laptop resumes NOW (user decision 2026-11-14, Soraya advance-2026-11-14 disposition gate). Laptop session robotics-b9 active; staged roadmap has RL as Stage 3 but user greenlights immediate resumption of laptop training work. |
+| 25 | 2026-11-14 | run-tests | Backfill 2026-09-04..10-30 hardware verdicts (user-observed wiggle tests): TRUE wiring map found (nearly stock, back-left hip/knee pair swapped; DEFAULT_LEGS_PINS=[2,3,7,8,1,0,10,11] deployed); PWM0<->PWM9 swap test run with user as observer | back-left SHIN servo DEAD (silent at ±45 on proven-good P9); P0 HAT channel GOOD (tail moved on it); front-left shin silent on P3 ±60x3 — P3<->P0 swap test pending; Aug-29 "dead hip" verdict revised (P0 = knee under true map); battery 7.84V during tests |
+| 26 | 2026-11-14 | propose | /project-state --refresh-frame | current-state: Companion 90% complete; TRUE wiring map established; back-left shin servo DEAD, P0 channel good, front-left shin pending P3<->P0 swap; gait roadmap agreed with robotics-b9; RL resumption greenlit 2026-11-14 |
 <!-- project-state:end:action-log -->
 
 ## Open Questions for User
