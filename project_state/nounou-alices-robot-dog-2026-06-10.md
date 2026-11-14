@@ -75,6 +75,7 @@ Nounou is Alice's daily companion — she talks to him, he recognizes her, follo
 | 6 | CSI ribbon cable disconnects during head movement | observed 2026-06-10 | high | 2026-06-10 |
 | 7 | Back-left knee servo (pin 1) faulty: consistent ~20-30 deg wrong settle position + hunting oscillation; repeatability test 3x confirmed 2026-08-10; battery ruled out (8.40V full) | isolation tests 2026-08-10 | high | 2026-08-10 |
 | 8 | Back-left knee servo runs HOT + shows hysteresis (accurate only at 0, wrong at all other angles, direction-dependent) — software remap ruled out; physical replacement required | delta sweep + touch test 2026-08-10 | high | 2026-08-10 |
+| 9 | Back-left SHIN servo electrically dead (silent at ±45 on proven-good P9 channel); P0 HAT channel good (tail moved on it); front-left shin silent on P3 — servo-vs-channel split pending P3<->P0 swap | swap test, user-observed 2026-10-30 | high | 2026-11-14 |
 <!-- project-state:end:evidence -->
 
 ### Unknowns
@@ -131,16 +132,16 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 ### Candidate next actions
 | # | Action | Class | Expected progress | Expected info gain | Uncertainty | Cost |
 |---|---|---|---|---|---|---|
-| 1 | Reposition Pi board (CSI port faces head) | ask-user | high (unblocks camera) | medium (tests H1) | low | 30 min user time |
-| 2 | Pair + configure BT speaker | ask-user | high (unblocks audio) | low | low | 1 hr user time |
-| 3 | Write BT auto-detect code in companion.py | edit-local-code | medium | low | low | 30 min |
-| 4 | Enroll Alice's face | ask-user | medium | medium (tests tracking) | low | 10 min |
-| 5 | Run first interaction test with Alice | ask-user | high (milestone 1) | very high (tests H2, H3) | medium | 1 hr |
-| 6 | Add proactive conversation initiation | edit-local-code | medium | medium | medium | 2 hrs |
-| 7 | Add emotional sound layer (.wav files) | edit-local-code | medium | medium | low | 2 hrs |
-| 8 | Validate RL reward function on laptop | run-tests | low | medium (tests H4) | medium | 1 hr |
-| 9 | Run 3M step PPO training on laptop | run-tests | medium | high | high | 8+ hrs compute |
-| 10 | Add API cost monitoring | edit-local-code | low | low | low | 30 min |
+| 1 | P3<->P0 cable swap + guided wiggle (front-left shin servo-vs-channel verdict) | ask-user | high (last wiring unknown) | very high | low | 10 min user time |
+| 2 | Order replacement servos (1 confirmed dead + pending + tail slot) | ask-user | high (unblocks all leg work) | low | low | money — user purchase |
+| 3 | Brownout headroom test (2->4->6 simultaneous servos, hw_checkup.py) | run-tests | medium | high (gait power envelope) | low | 10 min attended |
+| 4 | Replace dead servo(s), then user-driven 0_calibration.py zero-true | ask-user | high | medium | medium | 1-2 hrs user time |
+| 5 | Stock crawl under corrected pin map (first walk milestone) | run-tests | very high (milestone 4 path) | very high | medium | blocked on 1-4 |
+| 6 | USER EXERCISE: IMU tilt-logger script (coached, user writes) | ask-user | medium | medium (learning goal) | low | 1 hr user time |
+| 7 | Restructure pidog_env.py obs to IMU + last-actions (laptop/robotics-b9) | edit-local-code | medium | high (RL resumed 2026-11-14) | medium | laptop session |
+| 8 | Re-verify sit vs known_good_sit.json after servo replacement | run-tests | medium | low | low | 15 min |
+| 9 | CSI cable re-seat + head-yaw hunting fix | ask-user | low | low | medium | 30 min user time |
+| 10 | Alice first-interaction test (checklist in SESSION_LOG 2026-06-12) | ask-user | very high (milestone 1) | very high (tests H2, H3) | medium | after legs stable |
 <!-- project-state:end:candidate-actions -->
 
 ### Re-evaluation trigger
@@ -186,6 +187,8 @@ Alice has a sustained daily interaction with Nounou — she talks to him, he rec
 | 24 | 2026-11-14 | ask-user | /project-state --resolve-pending-decision | Pending Decisions row 2: RL training on laptop resumes NOW (user decision 2026-11-14, Soraya advance-2026-11-14 disposition gate). Laptop session robotics-b9 active; staged roadmap has RL as Stage 3 but user greenlights immediate resumption of laptop training work. |
 | 25 | 2026-11-14 | run-tests | Backfill 2026-09-04..10-30 hardware verdicts (user-observed wiggle tests): TRUE wiring map found (nearly stock, back-left hip/knee pair swapped; DEFAULT_LEGS_PINS=[2,3,7,8,1,0,10,11] deployed); PWM0<->PWM9 swap test run with user as observer | back-left SHIN servo DEAD (silent at ±45 on proven-good P9); P0 HAT channel GOOD (tail moved on it); front-left shin silent on P3 ±60x3 — P3<->P0 swap test pending; Aug-29 "dead hip" verdict revised (P0 = knee under true map); battery 7.84V during tests |
 | 26 | 2026-11-14 | propose | /project-state --refresh-frame | current-state: Companion 90% complete; TRUE wiring map established; back-left shin servo DEAD, P0 channel good, front-left shin pending P3<->P0 swap; gait roadmap agreed with robotics-b9; RL resumption greenlit 2026-11-14 |
+| 27 | 2026-11-14 | propose | /project-state --append-observation | Evidence row 9: back-left shin servo dead / P0 channel good (swap test, user-observed 2026-10-30); front-left shin pending P3<->P0 swap |
+| 28 | 2026-11-14 | edit-local-code | Direct-Edit refresh of Bellman Candidate-next-actions table (v0.5 API gap workaround, old version in git history): June-era rows replaced with current gait-roadmap actions (swap test, servo purchase, brownout headroom, crawl milestone, IMU exercise, RL obs restructure) | complete — mirrored per AC9 |
 <!-- project-state:end:action-log -->
 
 ## Open Questions for User
